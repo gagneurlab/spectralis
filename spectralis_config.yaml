@@ -1,0 +1,56 @@
+### PROSIT CERTIFICATES
+path_to_ca_certificate: '/s/project/denovo-prosit/DanielaAndrade/1_datasets/Hela_internal/prosit_certificates/Proteomicsdb-Prosit.crt'
+path_to_key_certificate: '/s/project/denovo-prosit/DanielaAndrade/1_datasets/Hela_internal/prosit_certificates/dandrade.key'
+path_to_certificate: '/s/project/denovo-prosit/DanielaAndrade/1_datasets/Hela_internal/prosit_certificates/dandrade.crt' 
+server: 'proteomicsdb.org:8500'
+
+
+### PATHS
+binreclass_model_path: '/s/project/denovo-prosit/JohannesHingerl/models/focal_loss_wang_jit_model.pt'
+scorer_path: '/s/project/denovo-prosit//DanielaAndrade/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_REL_PERF__rf_model_NTREES86_MINSPLIT4_MINLEAF112_MAXFEAT36_MAXDEPTH175.pkl'
+aa_mass_lookup_path: '/s/project/denovo-prosit/DanielaAndrade/1_datasets/Hela_internal/lookup/mass_sorted_v5.csv'
+
+### BIN RECLASSIFICATION
+BATCH_SIZE: 2048
+
+BIN_RESOLUTION: 1
+MAX_MZ_BIN: 2000
+
+N_CHANNELS: 24
+N_CONVS: 16
+DROPOUT: 0.35108249289592314
+KERNEL_SIZE: 3
+BATCH_NORM: True
+ION_TYPES: ['y', 'b']
+ION_CHARGES: [1]
+ADD_INPUT_TO_END: True
+
+add_intensity_diff: False
+add_precursor_range: False
+log_transform: False
+sqrt_transform: False
+add_leftmost_rightmost: True
+
+
+### GUIDED MUTATIONS
+bin_prob_threshold: 0.35
+input_bin_weight: 0.1
+
+### SCORING
+change_prob_thresholds: [0.3 , 0.4, 0.45, 0.5, 0.55, 0.6]
+max_delta_ppm: 0.00002
+min_intensity: 0.02
+
+### GA only
+POPULATION_SIZE: 1024
+ELITE_RATIO: 0.3
+NUM_GEN: 5
+TEMPERATURE: 10
+MIN_SCORE: -2
+MAX_SCORE: -1
+cache_scores: True
+
+num_cores: -1
+write_pop_to_file: False
+
+verbose: False

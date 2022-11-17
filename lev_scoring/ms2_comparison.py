@@ -23,7 +23,7 @@ def _compute_common_peaks(theo_mzs, theo_int, exp_mzs, exp_int, ppm_diff=20):
     #print (np.nonzero(theo_mzs[theo_mzs>0])
     return common_peaks
 
-def updated_get_all_features(all_theo_mzs, all_theo_ints, all_exp_mzs, all_exp_ints, apply_min_max_norm=False):
+def compute_all_features(all_theo_mzs, all_theo_ints, all_exp_mzs, all_exp_ints, apply_min_max_norm=False):
     ''' Compute common peaks and get all features
             For this assume, prosit is (N_samples, 174) arrays containing -1 preprocessed with _process_theo_ms2()
             And assume exp ms2 are preprocessed with _process_exp_ms2()

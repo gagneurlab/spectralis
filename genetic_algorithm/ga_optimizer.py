@@ -23,46 +23,43 @@ from joblib import Parallel, delayed
 from denovo_utils import __utils__ as U
 from denovo_utils import __constants__ as C
 
-from generatingSequences import SequenceGenerator
-
-import sys
-sys.path.insert(0,'..')
-sys.path.insert(0,'../..')
-
-from bin_reclassification.peptide2profile import Peptide2Profile
-from bin_reclassification.profile2peptide import Profile2Peptide
-from bin_reclassification.datasets import BinReclassifierDataset_GA
-from bin_reclassification.models import P2PNetPadded2dConv
-
-import feature_computation.ms2 as ms2
+from seq_initializer import SequenceGenerator
 
 
-class OptWithGAandP2P():
+class GAOptimizer():
     
-    def __init__(self, binreclass_model_path, binreclass_config_path, 
-                 prosit_config_path, 
-                 lookup_table_path=None,
-                 scorer_path = None,
+    def __init__(self, bin_reclassifier, 
+                 prosit_predictor, 
+                 profile2peptider,
+                 scorer,
+                 
+                 lookup_table_path,
                  max_delta_ppm=20e-6, 
                  population_size=1024, 
-                 fix_top_ratio=0.3,
+                 elite_ratio=0.3,
                  n_generations=5, 
                  selection_temperature=10, 
-                 prosit_ce=0.32, min_intensity=0.02,
-                 bin_prob_threshold=0.35,
-                 input_weight=0.1,
-                 out_dir=None,with_p2p_features=True,
-                 write_pop_to_file=False,
+                 prosit_ce=0.32, 
+                 min_intensity=0.02,
+                 
                  max_score_thres=-1.0,
                  min_score_thres=-2.0,
+                                  
+                 out_dir=None,
+                 write_pop_to_file=False,
                  num_cores=-1,
-                 batch_size=4096,
-                 with_cache=True, verbose=False, 
+                 with_cache=True, 
+                 verbose=False, 
             ):
+        
+        self.scorer = scorer
+        self.bin_reclassifier = bin_reclassifier      
+        self.prosit_predictor = prosit_predictor
+        self._profile2peptide = profile2peptider
+        
         self.TRACK_LINEAGE = False
         
         self.num_cores = -1 
-        self.p2p_batch_size=batch_size
         
         self.MAX_SCORE_THRES = max_score_thres
         self.MIN_SCORE_THRES = min_score_thres
@@ -73,53 +70,33 @@ class OptWithGAandP2P():
         self.MAX_DELTA_PPM =  max_delta_ppm
         self.SELECTION_TEMPERATURE = selection_temperature # higher temperature: lower scores more probable
         self.POP_SIZE = population_size
-        self.FIX_TOP_RATIO = fix_top_ratio
+        self.FIX_TOP_RATIO = elite_ratio
         self.PROSIT_CE = prosit_ce
         self.MIN_INTENSITY = min_intensity
         self.N_GENERATIONS = n_generations
-        self.WITH_P2P_FEATS = with_p2p_features
+        self.ELITE_SIZE = int(self.FIX_TOP_RATIO*self.POP_SIZE)
         
         self.OUT_DIR = out_dir
         
-        self.bin_prob_threshold = bin_prob_threshold
-        self.input_weight = input_weight
         
-        self.ELITE_SIZE = int(self.FIX_TOP_RATIO*self.POP_SIZE)
         
         self.verbose = verbose
         self.with_cache = with_cache
         self.scores_cache = {}
-        self.binreclass_cache = {}
-        self.prosit_cache = {}
         
-        if lookup_table_path is not None:
-            self.generator = SequenceGenerator(lookup_table = lookup_table_path,
+
+        self.generator = SequenceGenerator(lookup_table = lookup_table_path,
                                                delta_mass= self.MAX_DELTA_PPM,
                                                perm_prob = 0.4,
-                                               tree_depth = 1,
-                                               tree_node_degree = 1,
                                                max_residues_replaced = 3,
                                                max_substitution_tries = 5,
-                                               verbose = False,
                                                sequential_subs = True
                                               )
-            print(f'[INFO] Initiated seq generator')
+            
 
-        if scorer_path is not None:
-            self.scorer = self._load_pickle_model(scorer_path)
-            print(f'[INFO] Loaded scorer:\n\t{self.scorer}')
 
-        self.binreclass_model, params = self._init_binreclass_model(binreclass_model_path, binreclass_config_path)
-        print(f'[INFO] Loaded bin reclass P2P-model')
         
-        self.prosit_predictor = self._init_prosit_predictor(prosit_config_path)
-        print(f'[INFO] Initiated prosit predictor')
         
-        self._peptide2profile = self._init_peptide2profile(params)
-        self._profile2peptide = self._init_profile2peptide(params)
-        print(f'[INFO] Initiated P2P objects')
-        
-        self.p2p_prob_thresholds = [0.3 , 0.4, 0.45, 0.5, 0.55, 0.6] #[0.4,0.5, 0.6,0.7,0.8,0.9] #[0.96,0.97,0.98,0.99, 0.999]
             
     def retrieve_name(self, var):
         callers_local_vars = inspect.currentframe().f_back.f_locals.items()
@@ -144,128 +121,10 @@ class OptWithGAandP2P():
         score_diffs = scores - max_score
         draw_probs = np.exp(score_diffs/self.SELECTION_TEMPERATURE) 
         draw_probs /= sum(draw_probs)
-        return np.random.choice(current_ids, n_seqs, p=draw_probs, replace=True)
-    
-    @staticmethod
-    def _load_pickle_model(pickle_path):
-        with open(pickle_path, 'rb') as file:
-            pickle_model = pickle.load(file)
-        return pickle_model
+        return np.random.choice(current_ids, n_seqs, p=draw_probs, replace=True)          
 
-    def _init_binreclass_model(self, model_path, config_path, num=0):
-        
-        
-        if torch.cuda.is_available():
-            torch.cuda.set_device(num)
-        self.device = torch.device(f'cuda:{num}' if torch.cuda.is_available() else 'cpu')
-        #print(f"Device used: {self.device}, device name : {torch.cuda.get_device_name()}")
-        
-        params = yaml.load(open(config_path), Loader=yaml.FullLoader) # load model params
-        
-        in_channels = len(params['ION_CHARGES'])*len(params['ION_TYPES'])+2
-        in_channels = in_channels+2 if params['add_intensity_diff'] else in_channels
-        in_channels = in_channels+1 if params['add_precursor_range'] else in_channels
-    
-        model = P2PNetPadded2dConv(num_bins=params['BIN_RESOLUTION']*params['MAX_MZ_BIN'],
-                                               in_channels=in_channels,
-                                               hidden_channels=params['N_CHANNELS'],
-                                               out_channels=2,
-                                               num_convs=params['N_CONVS'], 
-                                               dropout=params['DROPOUT'],
-                                               bin_resolution=params['BIN_RESOLUTION'],
-                                               batch_norm=params['BATCH_NORM'],
-                                               kernel_size=(3, params['KERNEL_SIZE']), 
-                                               padding=(1, 0 if params['KERNEL_SIZE']==1 else 1),
-                                               add_input_to_end=params['ADD_INPUT_TO_END']
-                                            )
-        #model.load_state_dict(torch.load(model_path, map_location=self.device))
-        #if str(self.device) != 'cpu':
-        #    model.cuda()
-        #model.eval()
-        checkpoint = torch.load(model_path, map_location=self.device)
-        new_checkpoint = dict()
-        for key in list(checkpoint.keys()):
-            if 'module.' in key:
-                new_checkpoint[key.replace('module.', '')] = checkpoint[key]
-                del checkpoint[key]
-            else:
-                new_checkpoint[key] = checkpoint[key]
-        model.load_state_dict(new_checkpoint)
-
-        if str(self.device) != 'cpu':
-            model.cuda()
-        model.eval()        
-        
-        return model, params
-    
-    @staticmethod
-    def _init_prosit_predictor(config_path):
-        params =  yaml.load(open(config_path), Loader=yaml.FullLoader) # load prosit config 
-        return PROSITpredictor(server=params['server'],
-                                path_to_ca_certificate = params['path_to_ca_certificate'],
-                                path_to_key_certificate = params['path_to_key_certificate'],
-                                path_to_certificate =  params['path_to_certificate']
-                              )
-    
-    def _init_peptide2profile(self, params):
-        return Peptide2Profile(bin_resolution=params['BIN_RESOLUTION'],
-                               max_mz_bin=params['MAX_MZ_BIN'], 
-                               considered_ion_types=params['ION_TYPES'], 
-                               considered_charges=params['ION_CHARGES'],
-                               add_leftmost_rightmost=True,
-                               verbose=self.verbose,
-                               prosit_predictor=self.prosit_predictor,
-                               sqrt_transform=params['sqrt_transform'],
-                               log_transform=params['log_transform']
-                             )
-    
-    def _init_profile2peptide(self, params):
-        return Profile2Peptide(  bin_resolution=params['BIN_RESOLUTION'], 
-                                 max_mz_bin=params['MAX_MZ_BIN'], 
-                                 prob_threshold=self.bin_prob_threshold,
-                                 input_weight = self.input_weight,
-                                 verbose=self.verbose,
-                               )
-
-
-    @staticmethod
-    def masked_spectral_angle(theo, exp):
-        epsilon = 1e-07
-        exp_masked = ((theo + 1) * exp) / (theo + 1 + epsilon)
-        theo_masked = ((theo + 1) * theo) / (theo + 1 + epsilon)
-
-        exp_norm = exp_masked/ np.linalg.norm(exp_masked, ord=2) 
-        theo_norm = theo_masked/ np.linalg.norm(theo_masked, ord=2) 
-
-        product = np.dot(exp_norm, theo_norm)
-        return 1 - 2 * np.arccos(product) / math.pi
-     
-    
-    def get_p2p_features(self, _change_probs):
-        p2p_features = []
-        for thres in self.p2p_prob_thresholds:
-            #n_changes = np.sum(_change_probs>thres, axis=1)
-            n_changes = []
-            for i in range(len(_change_probs)):
-                n_changes.append(np.sum(_change_probs[i]>thres))
-            p2p_features.append(np.array(n_changes))
-        p2p_features = np.vstack(p2p_features).T
-        return p2p_features
-        
-    def score_population(self, exp_mzs, exp_ints, 
-                         prosit_ints, prosit_mzs, scans=None, peptide_seqs=None, 
-                         apply_min_max_norm=False, y_change_bin_probs=None):
-        
-        features = self._get_features(exp_mzs=exp_mzs, exp_ints=exp_ints,
-                                      prosit_ints=prosit_ints, prosit_mzs=prosit_mzs,
-                                      apply_min_max_norm=apply_min_max_norm,
-                                      y_change_bin_probs=y_change_bin_probs)
-        
-        return -self.scorer.predict(features)
-
-    
-    def score_population_wCache(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, cache_ids,
-                               apply_min_max_norm=False, y_change_bin_probs=None):
+    def score_population_wCache(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, 
+                                cache_ids, y_change_bin_probs=None):
         
         scores = np.ones((len(prosit_ints),))
         
@@ -287,20 +146,16 @@ class OptWithGAandP2P():
         # exp_mzs, exp_ints, prosit_ints, prosit_mzs
         if len(idx_not_cached)>0:
             start_features = timer()
-            features = self._get_features(exp_mzs=exp_mzs[idx_not_cached], 
+            new_scores = self.scorer.get_scores(exp_mzs=exp_mzs[idx_not_cached], 
                                           exp_ints=exp_ints[idx_not_cached],
                                           prosit_ints=prosit_ints[idx_not_cached],
                                           prosit_mzs=prosit_mzs[idx_not_cached],
-                                          apply_min_max_norm=apply_min_max_norm,
                                           y_change_bin_probs=y_change_bin_probs[idx_not_cached] if y_change_bin_probs is not None else None
                                           )
             
-            print(f'--- Elapsed time for collecting {len(idx_not_cached)} features: {timedelta(seconds=timer()-start_features)}')
+            print(f'--- Elapsed time for collecting {len(idx_not_cached)} features and predicting scores: {timedelta(seconds=timer()-start_features)}')
             
-            #start_predict = timer()
-            new_scores = -self.scorer.predict(features)
-            #print(f'--- Elapsed time for predicting {len(idx_not_cached)} scores: {timedelta(seconds=timer()-start_predict)}')
-            
+        
             scores[idx_not_cached] = new_scores
 
             # Add new scores to cache
@@ -308,213 +163,6 @@ class OptWithGAandP2P():
                 self.scores_cache[tuple(cache_ids[idx])] = new_scores[i]
             print(f'\t\t\tUpdated cache size: {len(self.scores_cache)}')
         return scores
-
-    def get_binreclass_dataset(self, prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz):
-        #anno = prosit_output['annotation']
-        prosit_output = {'fragmentmz': prosit_mzs, 'intensity': prosit_ints, 'annotation':prosit_anno}
-        return BinReclassifierDataset_GA(p2p=self._peptide2profile, 
-                                             prosit_output=prosit_output, 
-                                             pepmass=pepmass,
-                                             exp_mzs=exp_mzs, 
-                                             exp_int=exp_int, 
-                                             precursor_mz=precursor_mz,
-                                            )
-    
-    def get_binreclass_preds(self, prosit_mzs, prosit_ints, prosit_anno, 
-                                     pepmass, exp_mzs, exp_int, precursor_mz, return_mz_changes=False):
-        
-        _dataset = self.get_binreclass_dataset(prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz)
-        dataloader = DataLoader(dataset=_dataset, batch_size=self.p2p_batch_size,
-                                shuffle=False, num_workers=0) ## why here num workers=0?
-        
-        all_y_probs, all_y_mz_probs, all_b_probs, all_b_mz_probs, all_y_changes, all_y_mz_inputs, all_b_mz_inputs = [],[],[],[],[],[],[]
-        #print(f'--- Starting with bin reclass preds for {len(prosit_mzs)} samples')
-        with torch.no_grad():
-            self.binreclass_model.eval()  
-            for local_batch in tqdm.tqdm(dataloader):
-                X = local_batch.to(self.device)
-
-                #with torch.cuda.amp.autocast(dtype=torch.float16, enabled=True):
-                outputs = self.binreclass_model(X)
-                outputs = outputs[:,:2,:].detach().cpu().numpy()
-                outputs = U.sigmoid(outputs)
-                
-                ## input and store change probs
-                inputs = X[:,:2,:].detach().cpu().numpy()
-                changes = outputs.copy()
-                idx_one = np.where(inputs==1)
-                changes[idx_one] = 1 - changes[idx_one]
-                
-                ## store only nonzero
-                y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs = self.adapt_binreclass_preds(outputs, changes, inputs)
-                all_y_probs.append(y_probs)
-                all_y_mz_probs.append(y_mz_probs)
-                all_b_probs.append(b_probs)
-                all_b_mz_probs.append(b_mz_probs)
-                all_y_changes.append(y_changes)
-                all_y_mz_inputs.append(y_mz_inputs)
-                all_b_mz_inputs.append(b_mz_inputs)
-                
-
-        all_y_probs = np.concatenate(all_y_probs)
-        all_y_mz_probs = np.concatenate(all_y_mz_probs)
-        all_b_probs = np.concatenate(all_b_probs)
-        all_b_mz_probs = np.concatenate(all_b_mz_probs)
-        all_y_changes = np.concatenate(all_y_changes)
-        all_y_mz_inputs = np.concatenate(all_y_mz_inputs)
-        all_b_mz_inputs = np.concatenate(all_b_mz_inputs)
-        
-        #for temp_var in [all_y_probs, all_y_mz_probs, all_b_probs, all_b_mz_probs, all_y_changes, all_y_mz_inputs, all_b_mz_inputs ]:
-        #        print('=== ', self.retrieve_name(temp_var), temp_var.shape, temp_var[0].shape)
-
-        
-        return all_y_probs, all_y_mz_probs, all_b_probs, all_b_mz_probs, all_y_changes, all_y_mz_inputs, all_b_mz_inputs     
-        
-        
-    def _run_binreclass_model(self, _dataset):
-        
-        dataloader = DataLoader(dataset=_dataset, batch_size=self.p2p_batch_size,
-                                shuffle=False, num_workers=8) ## why here num workers=0?
-        _outputs = []
-        _inputs = []
-        
-
-        with torch.no_grad():
-            self.binreclass_model.eval()  
-            for local_batch in tqdm.tqdm(dataloader):
-                X = local_batch.to(self.device)
-
-                #with torch.cuda.amp.autocast(dtype=torch.float16, enabled=True):
-                outputs = self.binreclass_model(X)
-                outputs = outputs[:,:2,:]#outputs[:,:y.shape[1],:]
-                
-                _outputs.append(outputs.detach().cpu().numpy())
-                _inputs.append(X[:,:2,:].detach().cpu().numpy())
-                
-
-        _outputs = np.concatenate(_outputs)#[:,0,:] # only y ions
-        _inputs = np.concatenate(_inputs)#[:,0,:]
-
-        return _outputs, _inputs.astype(int)
-    
-    def get_binreclass_preds_wCache(self, cache_ids, prosit_mzs, prosit_ints, prosit_anno, 
-                                    pepmass, exp_mzs, exp_int, precursor_mz, return_mz_changes=False):
-        
-        # Output should be: binreclass_out: y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs
-        N_elems = len(cache_ids)
-        y_probs, y_mz_probs  = np.empty((N_elems,), dtype=object), np.empty((N_elems,), dtype=object)
-        b_probs, b_mz_probs  = np.empty((N_elems,), dtype=object), np.empty((N_elems,), dtype=object)
-        y_mz_inputs, b_mz_inputs = np.empty((N_elems,), dtype=object), np.empty((N_elems,), dtype=object)
-        y_changes = np.empty((N_elems,), dtype=object)
-        
-        # Search if preds are already cached
-        idx_not_cached = []
-        for i in range(N_elems):
-            if tuple(cache_ids[i]) not in self.binreclass_cache:
-                idx_not_cached.append(i)
-            else:
-                binreclass_out = self.binreclass_cache[tuple(cache_ids[i])]  
-                y_probs[i], y_mz_probs[i], b_probs[i], b_mz_probs[i], y_changes[i], y_mz_inputs[i], b_mz_inputs[i] = binreclass_out
-                
-          
-        print(f'\t\tBinreclass cache size {len(self.binreclass_cache)}, Num not cached: {len(idx_not_cached)}')
-        idx_not_cached = np.array(idx_not_cached)
-        
-        if len(idx_not_cached)>0:
-            start_features = timer()
-            prosit_anno_not_cached = {}
-            for k in prosit_anno:
-                prosit_anno_not_cached[k] = prosit_anno[k][idx_not_cached]
-            
-            binreclass_out = self.get_binreclass_preds(prosit_mzs[idx_not_cached], prosit_ints[idx_not_cached],
-                                                       prosit_anno_not_cached, pepmass[idx_not_cached], exp_mzs[idx_not_cached], 
-                                                       exp_int[idx_not_cached], precursor_mz[idx_not_cached],
-                                                       return_mz_changes)
-            c_y_probs, c_y_mz_probs, c_b_probs, c_b_mz_probs, c_y_changes, c_y_mz_inputs, c_b_mz_inputs = binreclass_out
-            
-            y_probs[idx_not_cached], y_mz_probs[idx_not_cached] = c_y_probs, c_y_mz_probs
-            b_probs[idx_not_cached], b_mz_probs[idx_not_cached] = c_b_probs, c_b_mz_probs
-            y_mz_inputs[idx_not_cached], b_mz_inputs[idx_not_cached] = c_y_mz_inputs, c_b_mz_inputs 
-            y_changes[idx_not_cached] = c_y_changes
-            
-            
-            # Add new scores to cache
-            for i, idx in enumerate(idx_not_cached):
-                self.binreclass_cache[tuple(cache_ids[idx])] = y_probs[i], y_mz_probs[i], b_probs[i], b_mz_probs[i], y_changes[i], y_mz_inputs[i], b_mz_inputs[i]
-                
-            print(f'\t\t\tUpdated cache size: {len(self.binreclass_cache)}')
-        
-        return y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs
-    
-    def _outdated_get_binreclass_preds(self, prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz, return_mz_changes=False):
-        
-        _dataset = self.get_binreclass_dataset(prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz)
-        
-        _outputs, _inputs = self._run_binreclass_model(_dataset)
-        _outputs = U.sigmoid(_outputs)
-        
-        _change_probs = _outputs.copy()
-        idx_one = np.where(_inputs==1)
-        _change_probs[idx_one] = 1 - _change_probs[idx_one]
-            
-        return self.adapt_binreclass_preds(_outputs, _change_probs, _inputs, return_mz_changes=return_mz_changes)
-        #return _outputs, _change_probs, _inputs
-        
-    def adapt_binreclass_preds(self, _probs, _changes, _inputs, return_mz_changes=False):
-        
-        min_change_prob =  min(self.p2p_prob_thresholds)
-        min_pred_prob = self.bin_prob_threshold
-        
-        ion_types = [0,1]
-        
-        for ion_type in ion_types:
-            probs_sparse = []
-            mz_probs_sparse = []
-            
-            mz_changes_sparse = []
-            changes_sparse = []
-            mz_inputs_sparse = []
-
-            N_samples = len(_probs)
-            
-            for i in range(N_samples):
-            #for i in tqdm.tqdm(range(N_samples)):
-                current_mz_probs = np.where(_probs[i, ion_type]>min_pred_prob)[0]
-                current_probs = _probs[i, ion_type][current_mz_probs]
-                mz_probs_sparse.append(current_mz_probs)
-                probs_sparse.append(current_probs)
-                
-                ## Changes only for y
-                if ion_type==0:
-                    current_mz_changes = np.where(_changes[i, ion_type]>min_change_prob)[0]
-                    current_changes = _changes[i, ion_type][current_mz_changes]
-                    mz_changes_sparse.append(current_mz_changes)
-                    changes_sparse.append(current_changes)
-                
-                current_mz_inputs = np.where(_inputs[i, ion_type]>0)[0]
-                mz_inputs_sparse.append(current_mz_inputs)
-                
-
-            if ion_type==0:
-                y_probs = np.array(probs_sparse)
-                y_mz_probs = np.array(mz_probs_sparse)
-                y_mz_inputs = np.array(mz_inputs_sparse)
-                
-                y_changes = np.array(changes_sparse)
-                y_mz_changes = np.array(mz_changes_sparse)  
-                
-            else:
-                b_probs = np.array(probs_sparse)
-                b_mz_probs = np.array(mz_probs_sparse)
-                b_mz_inputs = np.array(mz_inputs_sparse)
-
-                
-                
-        #return y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_changes, b_changes, b_mz_changes, y_mz_inputs, b_mz_inputs
-        #return y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_changes, y_mz_inputs, b_mz_inputs
-        if return_mz_changes==True:
-            return y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs, y_mz_changes
-        return y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs
 
         
     def get_prosit_output(self, seqs, charges, ces=None):
@@ -528,57 +176,7 @@ class OptWithGAandP2P():
                 
                 return prosit_out['fragmentmz'],prosit_out['intensity'], prosit_out['annotation']
             except _Rendezvous as e:
-                time.sleep(5)
-    
-    def get_prosit_output_wCache(self, seqs, charges, cache_ids = None):
-        
-        prosit_out = np.zeros((len(seqs),174,2)) ## prosit_mzs and prosit_ints
-        prosit_ann = np.zeros((len(seqs),174,))
-        
-        # Search if preds are already cached
-        idx_not_cached = []
-        for i in range(len(prosit_out)):
-            if tuple(cache_ids[i]) not in self.prosit_cache:
-                idx_not_cached.append(i)
-            else:
-                prosit_out[i] = self.prosit_cache[tuple(cache_ids[i])]
-                prosit_ann[i] = self.prosit_ann_cache[tuple(cache_ids[i])]
-                
-        print(f'\t\t\tProsit cache size {len(self.prosit_cache)}, Num not cached: {len(idx_not_cached)}')
-        idx_not_cached = np.array(idx_not_cached)
-        
-        if len(idx_not_cached)>0:
-            start_features = timer()
-            
-            mzs_not_cached, ints_not_cached, ann_not_cached = self.get_prosit_output(seqs[idx_not_cached], charges[idx_not_cached])
-            
-            prosit_ann[idx_not_cached] = ann_not_cached
-            prosit_out[idx_not_cached] = np.dstack([mzs_not_cached, ints_not_cached])
-            
-            # Add new scores to cache
-            for i, idx in enumerate(idx_not_cached):
-                self.prosit_cache[tuple(cache_ids[idx])] = prosit_out[i]
-                self.prosit_ann_cache[tuple(cache_ids[idx])] = prosit_ann[i]
-            print(f'\t\t\tUpdated cache size: {len(self.prosit_cache)}')
-        
-        
-        return prosit_out[:,:,0], prosit_out[:,:,1], prosit_ann
-    
-    
-    def _get_features(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, apply_min_max_norm,
-                     y_change_bin_probs=None):
-        
-        # Assume exp int und exp mzs are preprocessed with ms2._process_exp_ms2
-        prosit_mzs, prosit_ints = ms2._process_theo_ms2(prosit_mzs, prosit_ints, 
-                                                        min_intensity=self.MIN_INTENSITY)
-        features = ms2.updated_get_all_features(prosit_mzs, prosit_ints, exp_mzs, exp_ints)
-        
-        #start_p2p_feats = timer()
-        if y_change_bin_probs is not None:
-            features = np.append(self.get_p2p_features(y_change_bin_probs), features, axis=1)  
-        #print(f'--- Elapsed time for collecting p2p features: {timedelta(seconds=timer()-start_p2p_feats)}')
-        
-        return features
+                time.sleep(5) 
     
     
     def get_initial_scores(self, initial_seqs, precursor_z, precursor_m, scans, 
@@ -588,19 +186,16 @@ class OptWithGAandP2P():
         alpha_seqs = [U.map_numbers_to_peptide(p) for p in initial_seqs]
         cache_ids = np.array([(alpha_seqs[i], scans[i]) for i in range(len(alpha_seqs))])     
 
-        
-        if  self.WITH_P2P_FEATS==True:
-            masses_sequences = np.array([U._compute_peptide_mass_from_seq(initial_seqs[j]) for j in range(len(initial_seqs)) ])
-            _, _, _, _, y_change_bin_probs, _, _, = self.get_binreclass_preds(prosit_mzs=prosit_mzs, 
-                                                                              prosit_ints=prosit_ints,
-                                                                              prosit_anno=prosit_anno,
-                                                                              pepmass=masses_sequences,
-                                                                              exp_mzs=exp_mzs,
-                                                                              exp_int=exp_intensities,
-                                                                              precursor_mz=precursor_m,
-                                                                            )
-        else:
-            y_change_bin_probs = None
+        masses_sequences = np.array([U._compute_peptide_mass_from_seq(initial_seqs[j]) for j in range(len(initial_seqs)) ])
+        _, _, _, _, y_change_bin_probs, _, _, = self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_mzs, 
+                                                                          prosit_ints=prosit_ints,
+                                                                          prosit_anno=prosit_anno,
+                                                                          pepmass=masses_sequences,
+                                                                          exp_mzs=exp_mzs,
+                                                                          exp_int=exp_intensities,
+                                                                          precursor_mz=precursor_m,
+                                                                        )
+
         
         scores = self.score_population_wCache(prosit_mzs = prosit_mzs ,
                                          prosit_ints = prosit_ints ,
@@ -614,9 +209,6 @@ class OptWithGAandP2P():
             return scores, prosit_mzs, prosit_ints, y_change_bin_probs
         return scores
     
-    def using(self, point=""):
-        return f'{point}: {psutil.Process().memory_info().rss / (1024 * 1024)} MB'
- 
     def determine_passed_not_passed(self, initial_seqs, precursor_z, precursor_m, scans,
                                     exp_mzs, exp_intensities,
                                    ):
@@ -864,7 +456,7 @@ class OptWithGAandP2P():
                 
             ## P2P preds
             start_p2p = timer()
-            binreclass_out = self.get_binreclass_preds(prosit_mzs=prosit_mzs,
+            binreclass_out = self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_mzs,
                                                           prosit_ints=prosit_ints,
                                                           prosit_anno=prosit_anno, 
                                                           pepmass=all_pep_masses,
@@ -884,7 +476,7 @@ class OptWithGAandP2P():
                                                                 exp_mzs=all_exp_mzs,
                                                                 exp_ints=all_exp_ints,
                                                                 cache_ids = cache_ids,
-                                                                y_change_bin_probs = y_changes if self.WITH_P2P_FEATS==True else None
+                                                                y_change_bin_probs = y_changes
 
                                             )
             print(f'--- Elapsed time for collecting scores: {timedelta(seconds=timer()-start_scoring)}, {self.using("mem")}. Shape: ', population_scores.shape)
@@ -895,8 +487,8 @@ class OptWithGAandP2P():
             ### Write results of gen-1 to file 
             if (self.OUT_DIR is not None):
                 timestamp = time.strftime('%Y%m%d_%H%M', time.localtime())
-                out_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_{self.N_GENERATIONS}_POPSIZE{self.POP_SIZE}_P2PTHRES{self.bin_prob_threshold}.csv'
-                pop_path = f'{self.OUT_DIR}/GAPOP_{timestamp}__GEN{gen-1}_{self.N_GENERATIONS}_POPSIZE{self.POP_SIZE}_P2PTHRES{self.bin_prob_threshold}.csv'
+                out_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_{self.N_GENERATIONS}_POPSIZE{self.POP_SIZE}_P2PTHRES{self.bin_reclassifier.bin_prob_threshold}.csv'
+                pop_path = f'{self.OUT_DIR}/GAPOP_{timestamp}__GEN{gen-1}_{self.N_GENERATIONS}_POPSIZE{self.POP_SIZE}_P2PTHRES{self.bin_reclassifier.bin_prob_threshold}.csv'
                 self.write_to_file(out_path, cache_ids, df_init, pop_path)
 
             if gen==self.N_GENERATIONS+1:
