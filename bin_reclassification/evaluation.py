@@ -15,14 +15,12 @@ from sklearn.linear_model import LogisticRegression
 from scipy.stats import pearsonr
 from sklearn.metrics import mean_squared_error
 
-import sys
-#sys.path.insert(0, '../../denovo_utils')
 from denovo_utils import eval_utils, __utils__ as U
 
-sys.path.insert(0, '../')
-sys.path.insert(0, '../../')
-
-from Bin_DenovoDataset import BinReclassifierDataset
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
+from datasets import BinReclassifierDataset
 from models import P2PNetPadded2dConv
 
 def _load_torch_model(model_path, model_config):

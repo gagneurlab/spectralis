@@ -9,6 +9,9 @@ from collections import OrderedDict as ODict
 
 from denovo_utils import __constants__ as C
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
 from ms2_binning import get_binning, get_bins_assigments
 
 import collections

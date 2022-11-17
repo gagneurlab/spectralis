@@ -8,6 +8,10 @@ __email__ = "daniela.andrade@tum.de"
 import numpy as np
 import pickle
 
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/lev_scoring'))
 import ms2_comparison
 
 class PSMLevScorer():
@@ -17,10 +21,10 @@ class PSMLevScorer():
                  min_intensity=0.02
                 ):
         
-        self.binreclass_model = binreclass_model
         self.bin_prob_thresholds = bin_prob_thresholds
-        
+        self.min_intensity = min_intensity
         self.scorer = self._load_pickle_model(scorer_path)
+        
         print(f'[INFO] Loaded scorer:\n\t{self.scorer}')
         
 

@@ -10,19 +10,30 @@ Spectralis should provide the following options:
     - GA optimization    
 
 """
+import yaml
+import numpy as np
+import pandas as pd
+
+import torch
+
+from denovo_utils import __constants__ as C
+from denovo_utils import __utils__ as U
+
+from prosit_grpc.predictPROSIT import PROSITpredictor
 
 from bin_reclassification.peptide2profile import Peptide2Profile
 from bin_reclassification.profile2peptide import Profile2Peptide
 from bin_reclassification.models import P2PNetPadded2dConv
+from bin_reclassification.bin_reclassifier import BinReclassifier
 
 from lev_scoring.scorer import PSMLevScorer
 
 class Spectralis():
     
-    def __init__(self, config_path,
-                 ):
-        
-        self.config = yaml.load(open(config_path), Loader=yaml.FullLoader) # load model params   
+    def __init__(self, config_path):
+        print('Loading config file:', config_path)
+        self.config = yaml.load(open(config_path), Loader=yaml.FullLoader) # load model params  
+        #print(self.config)
         self.verbose = self.config['verbose']
         
         self.prosit_predictor = self._init_prosit_predictor()
@@ -42,11 +53,13 @@ class Spectralis():
         print(f'[INFO] Initiated lev scorer')
         
     def _init_binreclassifier(self):
-        return BinReclassifier( peptide2profiler=self.peptide2profiler,
-                 batch_size=self.config['BATCH_SIZE'],
-                 min_bin_change_threshold=min(self.config['change_prob_thresholds']), ## check that this works
-                 min_bin_prob_threshold=self.config['bin_prob_threshold']
-                 )
+        return BinReclassifier( binreclass_model=self.binreclass_model,
+                                peptide2profiler=self.peptide2profiler,
+                                batch_size=self.config['BATCH_SIZE'],
+                                min_bin_change_threshold=min(self.config['change_prob_thresholds']), ## check that this works
+                                min_bin_prob_threshold=self.config['bin_prob_threshold'],
+                                device = self.device
+                            )
     
     def _init_scorer(self):
         return PSMLevScorer(self.config['scorer_path'], 
@@ -146,15 +159,69 @@ class Spectralis():
         optimizer.run_optimization(seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities)
         
     
+    def rescoring_from_csv_mgf(self, csv_paths, mgf_paths, scan_id_col, peptide_col, 
+                               precursor_z_key, precursor_mz_key, exp_mzs_key, exp_ints_key,
+                               prosit_ce, out_path=None):
+        ## TODO: get peptide seqs from csv and prec_mz, prec_z, exp_ints, exp_mzs from mgf_files
+        df = pd.concat([pd.read_csv(path) for path in csv_paths], axis=0).reset_index(drop=True)
+        
+        padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m = None
+        scores = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m)
+        
+        
+        return df
     
-    def rescoring_from_csv(csv_path, seq_col, charge_col, exp_mzs_col, exp_ints_col, prosit_ce):
-        ### TODO
-        return 
+    def rescoring_from_csv(self, input_path,
+                           peptide_col, precursor_z_col, prosit_ce, 
+                           exp_mzs_col, exp_ints_col, precursor_mz_col, 
+                           out_path=None
+                          ):
+        
+        df = pd.read_csv(input_path)
+        
+        df = df[df[peptide_col].notnull()]
+        df = df[~ (df[peptide_col].str.contains('\+'))  ] ## assign these sequences lowest scores?
+        df[peptide_col] = (df[peptide_col].apply(lambda s: s.strip()
+                                                            .replace('L', 'I')
+                                                            .replace('(Cam)', 'C')
+                                                            .replace('OxM', 'Z')
+                                                            .replace('M(O)', 'Z')
+                                                            .replace('M(ox)', 'Z')
+                                                ) )
+        
+        df["peptide_int"] = df[peptide_col].apply(U.map_peptide_to_numbers)
+        df["seq_len"] = df["peptide_int"].apply(len)
+        
+        df_notHandled = df[~(df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
+        df_notHandled['Spectralis_score'] = np.NINF # lowest possible score
+        
+        df = df[(df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
+        df = df.reset_index()
+        
+        precursor_z = np.array(list(df[precursor_z_col]))      
+        precursor_m = np.array([np.asarray(x) for x in df[precursor_mz_col]])
+
+        sequences = np.array([np.asarray(x) for x in df["peptide_int"]]).flatten()
+        padded_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
+        
+        exp_mzs = np.array(df[exp_mzs_col].apply(lambda x: np.array([float(el) for el in x.replace('[', '').replace(']', '').replace(' ', '').split(",")])))
+        exp_ints = np.array(df[exp_ints_col].apply(lambda x: np.array([float(el) for el in x.replace('[', '').replace(']', '').replace(' ', '').split(",")])))
+        
+        print(f'Getting scores for {len(padded_seqs)} PSMs')
+        df[f'Spectralis_score'] = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m)
+        
+        df = pd.concat([df, df_notHandled], axis=0).reset_index(drop=True)
+        df.drop(columns=['peptide_int', 'seq_len'], inplace=True)
+        
+        if out_path is not None:
+            df.to_csv(out_path)
+                
+        return df
         
     
     def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs):
         
-        self.prosit_predictor.predict(sequences=seqs, 
+        prosit_out = self.prosit_predictor.predict(sequences=seqs, 
                                       charges=[int(c) for c in charges], 
                                       collision_energies=[prosit_ce]*len(seqs), 
                                       models=["Prosit_2019_intensity"])['Prosit_2019_intensity']

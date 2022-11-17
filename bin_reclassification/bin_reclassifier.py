@@ -5,19 +5,31 @@ __author__ = "Daniela Andrade Salazar"
 __email__ = "daniela.andrade@tum.de"
 
 """
+import tqdm
+import numpy as np
 
-from bin_reclassification.datasets import BinReclassifierDataset_GA
+import torch
+from torch.utils.data.dataloader import DataLoader
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
+from datasets import BinReclassifierDataset_GA
 
 class BinReclassifier():
     
-    def __init__(self, peptide2profiler,
+    def __init__(self, 
+                 binreclass_model,
+                 peptide2profiler,
                  batch_size=1024,
                  min_bin_change_threshold=0.3,
-                 min_bin_prob_threshold=0.35
+                 min_bin_prob_threshold=0.35,
+                 device=None
                  ):
         
+        self.device = device
         self.peptide2profiler = peptide2profiler
-        self.binreclass_model = None
+        self.binreclass_model = binreclass_model
         
         self.batch_size = batch_size
         
@@ -36,6 +48,7 @@ class BinReclassifier():
                                              exp_int=exp_int, 
                                              precursor_mz=precursor_mz,
                                             )
+
     
     def get_binreclass_preds(self, prosit_mzs, prosit_ints, prosit_anno, 
                               pepmass, exp_mzs, exp_int, precursor_mz, return_mz_changes=False):
@@ -53,7 +66,7 @@ class BinReclassifier():
                 #with torch.cuda.amp.autocast(dtype=torch.float16, enabled=True):
                 outputs = self.binreclass_model(X)
                 outputs = outputs[:,:2,:].detach().cpu().numpy()
-                outputs = U.sigmoid(outputs)
+                outputs = 1 / (1 + np.exp(-outputs)) #self.sigmoid(outputs)
                 
                 ## input and store change probs
                 inputs = X[:,:2,:].detach().cpu().numpy()

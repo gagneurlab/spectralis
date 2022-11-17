@@ -8,6 +8,9 @@ import torch.nn.functional as F
 from torch.cuda.amp import autocast
 import torch.jit as jit
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
 from ms2_binning import get_bins_assigments
        
 

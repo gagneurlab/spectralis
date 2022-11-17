@@ -3,12 +3,14 @@ import numpy as np
 
 import torch
 
-import sys
-
-from peptide2profile import Peptide2Profile
 import pickle
 from denovo_utils import __utils__ as U
 import random
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
+from peptide2profile import Peptide2Profile
 
 class BinReclassifierDataset():
     

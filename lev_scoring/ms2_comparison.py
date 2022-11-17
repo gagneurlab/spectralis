@@ -4,6 +4,9 @@ from joblib import Parallel, delayed
 
 from datetime import timedelta
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/lev_scoring'))
 import similarity_features as sim
 import counting_features as coun
 
@@ -23,7 +26,7 @@ def _compute_common_peaks(theo_mzs, theo_int, exp_mzs, exp_int, ppm_diff=20):
     #print (np.nonzero(theo_mzs[theo_mzs>0])
     return common_peaks
 
-def compute_all_features(all_theo_mzs, all_theo_ints, all_exp_mzs, all_exp_ints, apply_min_max_norm=False):
+def compute_all_features(all_theo_mzs, all_theo_ints, all_exp_mzs, all_exp_ints):
     ''' Compute common peaks and get all features
             For this assume, prosit is (N_samples, 174) arrays containing -1 preprocessed with _process_theo_ms2()
             And assume exp ms2 are preprocessed with _process_exp_ms2()
@@ -35,23 +38,23 @@ def compute_all_features(all_theo_mzs, all_theo_ints, all_exp_mzs, all_exp_ints,
     #                                                    all_exp_mzs[i],
     #                                                    all_exp_ints[i])
     
-    #start_common_feats = timer()
+    start_common_feats = timer()
     all_common_peaks = Parallel(n_jobs = -1)(delayed(_compute_common_peaks)(*input) for input in 
                                                     zip(all_theo_mzs, 
                                                         all_theo_ints,
                                                         all_exp_mzs,
                                                         all_exp_ints))
     all_common_peaks = np.stack(all_common_peaks)
-    #print(f'--- Elapsed time for collecting {len(all_common_peaks)} common peaks: {timedelta(seconds=timer()-start_common_feats)}')
+    print(f'--- Elapsed time for collecting {len(all_common_peaks)} common peaks: {timedelta(seconds=timer()-start_common_feats)}')
     
     ### Get all features
-    #start_distance = timer()
+    start_distance = timer()
     distance_feats = sim.get_all_features(exp_int=all_common_peaks[:,:,3], theo_int=all_common_peaks[:,:,1])
-    #print(f'--- Elapsed time for collecting distance feats: {timedelta(seconds=timer()-start_distance)}')
+    print(f'--- Elapsed time for collecting distance feats: {timedelta(seconds=timer()-start_distance)}')
     
-    #start_counting = timer()
+    start_counting = timer()
     counting_feats = coun.get_counting_features(all_common_peaks)
-    #print(f'--- Elapsed time for collecting counting feats: {timedelta(seconds=timer()-start_counting)}')
+    print(f'--- Elapsed time for collecting counting feats: {timedelta(seconds=timer()-start_counting)}')
     
     all_feats = np.hstack([distance_feats, counting_feats])
     return all_feats
