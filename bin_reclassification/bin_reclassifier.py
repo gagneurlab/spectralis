@@ -49,6 +49,34 @@ class BinReclassifier():
                                              precursor_mz=precursor_mz,
                                             )
 
+    def get_binreclass_preds_for_eval(self, prosit_mzs, prosit_ints, prosit_anno, 
+                                      pepmass, exp_mzs, exp_int, precursor_mz):
+        
+        _dataset = self.get_binreclass_dataset(prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz)
+        dataloader = DataLoader(dataset=_dataset, batch_size=self.batch_size, shuffle=False, num_workers=8)
+        
+        _outputs = []
+        _inputs = []
+        _targets = []
+        with torch.no_grad():
+            model.eval()  
+            for local_batch, local_y in tqdm.tqdm(dataloader):
+                X = local_batch.to(device) #, local_y.float().to(device)
+                outputs = model(X)
+                outputs = outputs[:,:local_y.shape[1],:]
+                _outputs.append(outputs.detach().cpu().numpy())
+                _inputs.append(X[:,:local_y.shape[1],:].detach().cpu().numpy())
+                _targets.append(local_y)
+
+        _outputs = np.concatenate(_outputs)#[:,0,:] # only y ions
+        _inputs = np.concatenate(_inputs)#[:,0,:]
+        _targets = np.concatenate(_targets)#[:,0,:] 
+        
+        _outputs = 1 / (1 + np.exp(-_outputs))
+        
+        return _outputs, _inputs, _targets
+
+        
     
     def get_binreclass_preds(self, prosit_mzs, prosit_ints, prosit_anno, 
                               pepmass, exp_mzs, exp_int, precursor_mz, return_mz_changes=False):

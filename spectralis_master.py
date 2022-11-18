@@ -239,4 +239,33 @@ class Spectralis():
         y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs = binreclass_out
         
         return self.scorer.get_scores(exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_changes)
+    
+    def bin_reclassification(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_changes=True):
+        
+        prosit_out = self.prosit_predictor.predict(sequences=seqs, 
+                                      charges=[int(c) for c in charges], 
+                                      collision_energies=[prosit_ce]*len(seqs), 
+                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
+        prosit_mzs, prosit_ints, prosit_anno =  prosit_out['fragmentmz'],prosit_out['intensity'], prosit_out['annotation']
+        
+        peptide_masses = np.array([U._compute_peptide_mass_from_seq(seqs[j]) for j in range(len(seqs)) ])
+        _outputs, _inputs, _targets = self.bin_reclassifier.get_binreclass_preds_for_eval(prosit_mzs=prosit_mzs,
+                                                          prosit_ints=prosit_ints,
+                                                          prosit_anno=prosit_anno, 
+                                                          pepmass=peptide_masses,
+                                                          exp_mzs=exp_ints,
+                                                          exp_int=exp_mzs,
+                                                          precursor_mz=precursor_mzs,
+                                                        )
+        
+        if return_changes:
+            _changes = _targets.copy()
+            _changes[np.where(_inputs==1)] = 1- _changes[np.where(_inputs==1)] 
+            
+            _change_labels = (_inputs!=_targets)
+            return _outputs, _inputs, _targets, _changes, _change_labels
+            
+        else:
+            return _outputs, _inputs, _targets
+    
         
