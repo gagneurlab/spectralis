@@ -474,14 +474,12 @@ class GAOptimizer():
                                             )
             print(f'--- Elapsed time for collecting scores: {timedelta(seconds=timer()-start_scoring)}, {self.using("mem")}. Shape: ', population_scores.shape)
             #print('Scores-cache size:', len(self.scores_cache))
-
-            
             
             ### Write results of gen-1 to file 
             if (self.OUT_DIR is not None):
                 timestamp = time.strftime('%Y%m%d_%H%M', time.localtime())
-                out_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_{self.N_GENERATIONS}_POPSIZE{self.POP_SIZE}_P2PTHRES{self.bin_reclassifier.bin_prob_threshold}.csv'
-                pop_path = f'{self.OUT_DIR}/GAPOP_{timestamp}__GEN{gen-1}_{self.N_GENERATIONS}_POPSIZE{self.POP_SIZE}_P2PTHRES{self.bin_reclassifier.bin_prob_threshold}.csv'
+                out_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_ga_out.csv'
+                pop_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_ga_pop.csv'
                 self.write_to_file(out_path, cache_ids, df_init, pop_path)
 
             if gen==self.N_GENERATIONS+1:

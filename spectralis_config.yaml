@@ -7,8 +7,11 @@ server: 'proteomicsdb.org:8500'
 
 ### PATHS
 binreclass_model_path: '/s/project/denovo-prosit/JohannesHingerl/models/focal_loss_wang_jit_model.pt'
-scorer_path: '/s/project/denovo-prosit//DanielaAndrade/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_REL_PERF__rf_model_NTREES86_MINSPLIT4_MINLEAF112_MAXFEAT36_MAXDEPTH175.pkl'
+#scorer_path: '/s/project/denovo-prosit//DanielaAndrade/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_REL_PERF__rf_model_NTREES86_MINSPLIT4_MINLEAF112_MAXFEAT36_MAXDEPTH175.pkl'
+scorer_path: '/s/project/denovo-prosit/DanielaAndrade/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_MAX_REC__rf_model_NTREES182_MINSPLIT114_MINLEAF77_MAXFEAT88_MAXDEPTH420.pkl'
+
 aa_mass_lookup_path: '/s/project/denovo-prosit/DanielaAndrade/1_datasets/Hela_internal/lookup/mass_sorted_v5.csv'
+
 
 ### BIN RECLASSIFICATION
 BATCH_SIZE: 2048

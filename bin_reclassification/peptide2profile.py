@@ -20,13 +20,14 @@ class Peptide2Profile:
     
     def __init__(self, bin_resolution=1, max_mz_bin=2500, 
                  considered_ion_types=[ 'y', 'b'], considered_charges=[1,2,3],
-                 path_to_ca_certificate='', path_to_key_certificate='', path_to_certificate='',
                  add_leftmost_rightmost=True,
                  verbose=False,
                  add_fragment_position=False,
-                 prosit_predictor=None,
                  sqrt_transform=True,
-                 log_transform=False
+                 log_transform=False,
+                 add_intensity_diff=False,
+                 sparse_representation=False, 
+                 add_precursor_range=False
                 ):
         '''
             bin_resolution: in [Da]
@@ -40,16 +41,10 @@ class Peptide2Profile:
         self.add_fragment_position = add_fragment_position
         self.log_transform = log_transform
         self.sqrt_transform = sqrt_transform
-        #print(self.log_transform)
-        if prosit_predictor is None:
-            prosit_server = 'proteomicsdb.org:8500'
-            self.prosit_predictor = PROSITpredictor(server=prosit_server,
-                                        path_to_ca_certificate = path_to_ca_certificate,
-                                        path_to_key_certificate = path_to_key_certificate,
-                                        path_to_certificate =  path_to_certificate
-                                      )
-        else:
-            self.prosit_predictor = prosit_predictor
+        self.add_intensity_diff = add_intensity_diff
+        self.sparse_representation =  sparse_representation
+        self.add_precursor_range = add_precursor_range
+
             
         self.considered_ion_types = considered_ion_types
         self.considered_charges = considered_charges
@@ -97,57 +92,9 @@ class Peptide2Profile:
                              ) 
             binned_intensities[i] = b
         
-        return binned_intensities ## (n_seqs, n_fragment_types, n_bins)
+        return binned_intensities ## (n_seqs, n_fragment_types, n_bins)      
     
-    def get_peptide2binned(self, peptide_seqs, charges, ces):
-        ## Get prosit preds
-        prosit_output = self.prosit_predictor.predict(sequences=peptide_seqs, 
-                                                      charges=charges, collision_energies=ces, 
-                                                        models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
-    
-        return self._get_peptide2binned(prosit_output)
-        
-        
-    
-    def get_peptide2binnedWchannels(self, peptide_seqs, charges, ces, sparse_representation=False):
-        ## Get prosit preds
-        prosit_output = self.prosit_predictor.predict(sequences=peptide_seqs, 
-                                                      charges=charges, collision_energies=ces, 
-                                                        models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
-    
-        ## Collect binned intensities for every seq and every considered fragment_type
-        binned_intensities = np.zeros((len(peptide_seqs), 
-                                       len(self.considered_charges) * len(self.considered_ion_types),
-                                       math.ceil(self.max_mz_bin/self.bin_resolution), 
-                                      ), dtype=np.float16)       
-        self.considered_fragments = []
-        j = 0
-        for charge in self.considered_charges:
-            for ion_type in self.considered_ion_types:
-                #print(ion_type, charge)
-                self.considered_fragments.append(f'{ion_type}{"".join(["+"]*charge)}')
-                ## Subset ion type and charge
-                mzs, intensities = self._subset_prosit(prosit_output, ion_type=ion_type, charge=charge)
-                
-                ## Handle every seq
-                for i in tqdm.tqdm(range(mzs.shape[0]), disable=True):
-                    b = get_binning(mzs[i], intensities[i], max_norm=False, remove_minus_one=True, 
-                                       precursor_mz=None, min_intensity=0.0 ,
-                                       square_root=False, log_scale=False,
-                                       bin_resolution=self.bin_resolution,
-                                       max_mz_bin=self.max_mz_bin
-                                     ) 
-                    binned_intensities[i, j , :] = b
-                    
-                j +=1
-        
-        if sparse_representation==True:
-            binned_intensities = [csc_matrix(binned_intensities[i], 
-                                             dtype=np.float32) for i in range(binned_intensities.shape[0])  ]
-        
-        return binned_intensities ## (n_seqs,  n_fragment_types, n_bins)
-    
-    def _get_peptide2profile(self, prosit_output, sparse_representation=False, pepmass=None):
+    def _get_peptide2profile(self, prosit_output, pepmass=None):
         
         ## Collect binned intensities for every seq and every considered fragment_type
         n_bins = math.ceil(self.max_mz_bin/self.bin_resolution)
@@ -209,24 +156,10 @@ class Peptide2Profile:
         
         
         
-        if sparse_representation==True:
+        if self.sparse_representation==True:
             profiles = [csc_matrix(profiles[i], 
                                   dtype=np.int8) for i in range(profiles.shape[0])  ]          
         return profiles
-    
-    
-    def get_peptide2profile(self, peptide_seqs, charges, ces, sparse_representation=False):
-        
-        ## Get prosit preds
-        prosit_output = self.prosit_predictor.predict(sequences=peptide_seqs, 
-                                                      charges=[int(c) for c in charges],
-                                                      collision_energies=ces, 
-                                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
-        if self.add_leftmost_rightmost==True:
-            pepmass = np.array([self._compute_peptide_mass_from_seq(p) for p in peptide_seqs]) 
-        else:
-            pepmass=None
-        return self._get_peptide2profile(prosit_output, sparse_representation=sparse_representation, pepmass=pepmass)
         
         
     def get_exp2binned(self, exp_mzs, exp_int, precursor_mz=None):
@@ -272,16 +205,13 @@ class Peptide2Profile:
         exp_binned = np.expand_dims(exp_binned, axis=1)
         return exp_binned
     
-    def _get_peptideWExp2binned(self,prosit_output, exp_mzs, exp_int, pepmass, precursor_mz,
-                               add_intensity_diff, sparse_representation,
-                               add_precursor_range
-                               ):
+    def _get_peptideWExp2binned(self,prosit_output, exp_mzs, exp_int, pepmass, precursor_mz ):
         
-
+        print('APPLYING SQRT TRANSFORM?', self.sqrt_transform)
         profiles = self._get_peptide2profile(prosit_output, pepmass=pepmass)
         
         # Add precursor range
-        if add_precursor_range==True:
+        if self.add_precursor_range==True:
             precursor_ranges = self._get_precursor_ranges( profiles)
             profiles = np.hstack((profiles, precursor_ranges))
         
@@ -294,7 +224,7 @@ class Peptide2Profile:
         
         
         # Add intensity diff
-        if add_intensity_diff==True:
+        if self.add_intensity_diff==True:
             epsilon=1e-5
             max_rel_diff = 3
             diff_binned = abs(theo_binned-exp_binned)
@@ -309,52 +239,14 @@ class Peptide2Profile:
         
         
         
-        if sparse_representation==True:
+        if self.sparse_representation==True:
             combined = [csc_matrix(combined[i], 
                                     dtype=np.float32) for i in range(combined.shape[0])  ]
         
         return combined
         
     
-    
-    def get_peptideWExp2binned(self, peptide_seqs, charges, ces, 
-                               exp_mzs, exp_int, precursor_mz, sparse_representation=False,
-                               add_intensity_diff=False, add_precursor_range=False, 
-                              ):
-        
-        if self.add_leftmost_rightmost==True:
-            pepmass = np.array([self._compute_peptide_mass_from_seq(p) for p in peptide_seqs]) 
-        else:
-            pepmass = None
-            
-        prosit_output = self.prosit_predictor.predict(sequences=peptide_seqs, 
-                                                      charges=charges, collision_energies=ces, 
-                                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
-        return self._get_peptideWExp2binned(prosit_output=prosit_output, 
-                                            exp_mzs=exp_mzs,
-                                            exp_int=exp_int,
-                                            pepmass=pepmass,
-                                            precursor_mz=precursor_mz,
-                                            add_intensity_diff=add_intensity_diff, 
-                                            sparse_representation=sparse_representation,
-                                            add_precursor_range=add_precursor_range
-                                           )
-        
-    
-    def get_peptideWExp2binnedAcrossChannels(self, peptide_seqs, charges, ces, 
-                               exp_mzs, exp_int, precursor_mz, sparse_representation=False):
-        
-        binned_int = self.get_peptide2binnedWchannels(peptide_seqs, charges, ces)
-        exp_binned_int = self.get_exp2binned(exp_mzs, exp_int, precursor_mz)
-        
-        exp_binned_int = np.expand_dims(exp_binned_int, axis=1)
-        exp_binned_int = np.hstack((binned_int,exp_binned_int))
-        
-        if sparse_representation==True:
-            exp_binned_int = [csc_matrix(exp_binned_int[i], 
-                                         dtype=np.float32) for i in range(exp_binned_int.shape[0])  ]
-        
-        return exp_binned_int
 
-
+        
     
+

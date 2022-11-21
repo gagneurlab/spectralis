@@ -14,7 +14,7 @@ from torch.utils.data.dataloader import DataLoader
 import sys
 import os
 sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
-from datasets import BinReclassifierDataset_GA
+from datasets import BinReclassifierDataset_eval, BinReclassifierDataset
 
 class BinReclassifier():
     
@@ -41,28 +41,38 @@ class BinReclassifier():
     def get_binreclass_dataset(self, prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz):
         
         prosit_output = {'fragmentmz': prosit_mzs, 'intensity': prosit_ints, 'annotation':prosit_anno}
-        return BinReclassifierDataset_GA(p2p=self.peptide2profiler, 
+        return BinReclassifierDataset_eval(p2p=self.peptide2profiler, 
                                              prosit_output=prosit_output, 
                                              pepmass=pepmass,
                                              exp_mzs=exp_mzs, 
                                              exp_int=exp_int, 
                                              precursor_mz=precursor_mz,
                                             )
-
-    def get_binreclass_preds_for_eval(self, prosit_mzs, prosit_ints, prosit_anno, 
-                                      pepmass, exp_mzs, exp_int, precursor_mz):
+    
+    def get_binreclass_dataset_wTargets(self, prosit_output, peptide_masses, exp_mzs, exp_int, precursor_mz, 
+                                        prosit_output_true,peptide_masses_true):
         
-        _dataset = self.get_binreclass_dataset(prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz)
+        return BinReclassifierDataset(self.peptide2profiler, prosit_output, peptide_masses,
+                                       exp_mzs, exp_int, precursor_mz,
+                                       prosit_output_true, peptide_masses_true,
+                                    )
+    
+    def get_binreclass_preds_wTargets(self, prosit_output, 
+                                      pepmass, exp_mzs, exp_int, precursor_mz,
+                                      prosit_output_true,peptide_masses_true):
+        
+        _dataset = self.get_binreclass_dataset_wTargets(prosit_output, pepmass, exp_mzs, exp_int, precursor_mz,
+                                                        prosit_output_true,peptide_masses_true)
         dataloader = DataLoader(dataset=_dataset, batch_size=self.batch_size, shuffle=False, num_workers=8)
         
         _outputs = []
         _inputs = []
         _targets = []
         with torch.no_grad():
-            model.eval()  
+            self.binreclass_model.eval()
             for local_batch, local_y in tqdm.tqdm(dataloader):
-                X = local_batch.to(device) #, local_y.float().to(device)
-                outputs = model(X)
+                X = local_batch.to(self.device) #, local_y.float().to(self.device)
+                outputs = self.binreclass_model(X)
                 outputs = outputs[:,:local_y.shape[1],:]
                 _outputs.append(outputs.detach().cpu().numpy())
                 _inputs.append(X[:,:local_y.shape[1],:].detach().cpu().numpy())
@@ -86,6 +96,7 @@ class BinReclassifier():
         
         all_y_probs, all_y_mz_probs, all_b_probs, all_b_mz_probs, all_y_changes, all_y_mz_inputs, all_b_mz_inputs = [],[],[],[],[],[],[]
         
+        temp = 0
         with torch.no_grad():
             self.binreclass_model.eval()  
             for local_batch in tqdm.tqdm(dataloader):
@@ -101,7 +112,7 @@ class BinReclassifier():
                 changes = outputs.copy()
                 idx_one = np.where(inputs==1)
                 changes[idx_one] = 1 - changes[idx_one]
-                
+
                 ## store only nonzero
                 y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs = self.adapt_binreclass_preds(outputs, changes, inputs)
                 all_y_probs.append(y_probs)
@@ -140,14 +151,14 @@ class BinReclassifier():
             
             for i in range(N_samples):
             #for i in tqdm.tqdm(range(N_samples)):
-                current_mz_probs = np.where(_probs[i, ion_type]>=self.min_bin_prob_threshold)[0]
+                current_mz_probs = np.where(_probs[i, ion_type]>self.min_bin_prob_threshold)[0]
                 current_probs = _probs[i, ion_type][current_mz_probs]
                 mz_probs_sparse.append(current_mz_probs)
                 probs_sparse.append(current_probs)
                 
                 ## Changes only for y
                 if ion_type==0:
-                    current_mz_changes = np.where(_changes[i, ion_type]>=self.min_bin_change_threshold)[0]
+                    current_mz_changes = np.where(_changes[i, ion_type]>self.min_bin_change_threshold)[0]
                     current_changes = _changes[i, ion_type][current_mz_changes]
                     mz_changes_sparse.append(current_mz_changes)
                     changes_sparse.append(current_changes)

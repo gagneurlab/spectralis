@@ -12,8 +12,6 @@ def process_input(path, start_idx=None, sample_size=10000,
                   peptide_mq_col = 'peptide_mq',  lev_col = 'Lev_combined',
                   random_subset=None
                   ):
-
-
     
     df = pd.read_csv(path)
     #print(df.columns)
@@ -24,7 +22,6 @@ def process_input(path, start_idx=None, sample_size=10000,
     df[peptide_col] = df[peptide_col].apply(lambda s: s.replace(" ", "").replace('L', 'I').replace('(Cam)', 'C').replace('OxM', 'Z')) 
 
     print(df.shape)
-    
     
     df["peptide_int"] = df[peptide_col].apply(U.map_peptide_to_numbers)
     df["seq_len"] = df["peptide_int"].apply(len)
