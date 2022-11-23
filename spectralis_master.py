@@ -4,10 +4,11 @@
 __author__ = "Daniela Andrade Salazar"
 __email__ = "daniela.andrade@tum.de"
 
-Spectralis should provide the following options:
+Spectralis provides:
 
     - Rescoring
-    - GA optimization    
+    - GA optimization 
+    - Bin reclassification
 
 """
 import yaml
@@ -147,23 +148,51 @@ class Spectralis():
                                )
 
     
-    def genetic_algorithm_from_csv(self, csv_path, prosit_ce, out_dir,
-                                  start_idx=None, sample_size=10000,random_subset=None
+    def genetic_algorithm_from_csv(self, csv_path, prosit_ce, out_path,
                                   peptide_col = 'peptide_combined', scans_col = 'merge_id',
                                   precursor_z_col = 'charge',  precursor_mz_col = 'prec_mz',
                                   exp_ints_col = 'exp_ints', exp_mzs_col = 'exp_mzs', 
                                   peptide_mq_col = 'peptide_mq',  lev_col = 'Lev_combined',
+                                   chunk_size=None, chunk_offset=None,
                                   ):
-        _input = process_input(path, start_idx, sample_size, 
-                      peptide_col, scans_col, precursor_z_col, precursor_mz_col,
-                      exp_ints_col, exp_mzs_col, peptide_mq_col, lev_col, 
-                      random_subset 
-                      )
+        
+        _input = process_input(path=csv_path,
+                               peptide_col=peptide_col, scans_col=scans_col, 
+                               precursor_z_col=precursor_z_col, precursor_mz_col=precursor_mz_col,
+                               exp_ints_col=exp_ints_col, exp_mzs_col=exp_mzs_col, 
+                               peptide_mq_col=peptide_mq_col, lev_col=lev_col,
+                               chunk_size=chunk_size, chunk_offset=chunk_offset
+                              )
         scans, precursor_z,  padded_seqs,  precursor_m,  exp_mzs,  exp_intensities, padded_mq_seqs, levs = _input
                       
-        self.genetic_algorithm(seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, prosit_ce, out_dir)
+        self.genetic_algorithm(seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, prosit_ce, out_path)
         
-    def genetic_algorithm(self, seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, prosit_ce, out_dir):
+    def genetic_algorithm_from_csv_in_chunks(self, csv_path, prosit_ce, out_path, chunk_size,
+                                             peptide_col = 'peptide_combined', scans_col = 'merge_id',
+                                             precursor_z_col = 'charge',  precursor_mz_col = 'prec_mz',
+                                             exp_ints_col = 'exp_ints', exp_mzs_col = 'exp_mzs', 
+                                             peptide_mq_col = 'peptide_mq',  lev_col = 'Lev_combined',
+                                             ):
+        n = pd.read_csv(csv_path).shape[0]
+        n_chunks = math.ceil(n/chunk_size)
+        
+        out_dir = os.path.dirname(out_path)
+        
+        for chunk in range(n_chunks):
+            print(f'=== GENETIC ALGORITHM, Chunk:{chunk+1}/{n_chunks}')
+            self.genetic_algorithm_from_csv(csv_path=csv_path, prosit_ce=prosit_ce, 
+                                            out_path=f'{out_dir}/tmp_chunk_{chunk}_ga_out.csv',
+                                            peptide_col=peptide_col, scans_col=scans_col, 
+                                            precursor_z_col=precursor_z_col,  precursor_mz_col=precursor_mz_col,
+                                            exp_ints_col=exp_ints_col, exp_mzs_col=exp_mzs_col, 
+                                            peptide_mq_col=peptide_mq_col, lev_col=lev_col,
+                                            chunk_size=chunk_size, chunk_offset=chunk )        
+        
+        df_out = pd.concat([pd.read_csv(f'{out_dir}/tmp_chunk_{chunk}_ga_out.csv') for chunk in n_chunks])
+        df_out.to_csv(out_path, index=None)        
+        
+        
+    def genetic_algorithm(self, seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, prosit_ce, out_path):
         if self.scorer is None:
             self.scorer = self._init_scorer()  
             print(f'[INFO] Initiated lev scorer')
@@ -183,14 +212,13 @@ class Spectralis():
                                  max_score_thres=self.config['MAX_SCORE'],
                                  min_score_thres=self.config['MIN_SCORE'],
 
-                                 out_dir=out_dir,
                                  write_pop_to_file=self.config['write_pop_to_file'],
                                  num_cores=self.config['num_cores'],
                                  with_cache=self.config['cache_scores'], 
                                  verbose=self.verbose, 
                             )
         
-        optimizer.run_optimization(seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities)
+        optimizer.run_optimization(seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, out_path)
         
     
     def rescoring_from_csv_mgf(self, csv_paths, mgf_paths, scan_id_col, peptide_col, 
@@ -256,6 +284,12 @@ class Spectralis():
                 
         return df
         
+    def get_prosit_output(self, seqs, charges, prosit_ce):
+        return self.prosit_predictor.predict(sequences=seqs, 
+                                      charges=[int(c) for c in charges], 
+                                      collision_energies=[prosit_ce]*len(seqs), 
+                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
+        
     
     def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs):
                 
@@ -263,10 +297,7 @@ class Spectralis():
             self.scorer = self._init_scorer()  
             print(f'[INFO] Initiated lev scorer')
             
-        prosit_out = self.prosit_predictor.predict(sequences=seqs, 
-                                      charges=[int(c) for c in charges], 
-                                      collision_energies=[prosit_ce]*len(seqs), 
-                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
+        prosit_out = self.get_prosit_output(seqs, charges, prosit_ce)
         prosit_mzs, prosit_ints, prosit_anno =  prosit_out['fragmentmz'],prosit_out['intensity'], prosit_out['annotation']
         
         peptide_masses = np.array([U._compute_peptide_mass_from_seq(seqs[j]) for j in range(len(seqs)) ])
@@ -333,18 +364,14 @@ class Spectralis():
     
     
     def bin_reclassification(self, peptides_int, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, peptides_true_int=None, return_changes=True):
-        prosit_out = self.prosit_predictor.predict(sequences=peptides_int, 
-                                      charges=[int(c) for c in charges], 
-                                      collision_energies=[prosit_ce]*len(peptides_int), 
-                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
+        
+        prosit_out = self.get_prosit_output(peptides_int, charges, prosit_ce)
+        
         peptide_masses = np.array([U._compute_peptide_mass_from_seq(peptides_int[j]) for j in range(len(peptides_int)) ])
         
         if peptides_true_int is not None:
             print('Bin reclassification with targets')
-            prosit_out_true = self.prosit_predictor.predict(sequences=peptides_true_int, 
-                                          charges=[int(c) for c in charges], 
-                                          collision_energies=[prosit_ce]*len(peptides_true_int), 
-                                          models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
+            prosit_out_true = self.get_prosit_output(peptides_true_int, charges, prosit_ce)
             peptide_masses_true = np.array([U._compute_peptide_mass_from_seq(peptides_true_int[j]) for j in range(len(peptides_true_int)) ])
             
             _outputs, _inputs, _targets = self.bin_reclassifier.get_binreclass_preds_wTargets(prosit_out, peptide_masses,
@@ -391,10 +418,7 @@ class Spectralis():
                                                                                                                         peptide_true_key)
                 peptide_masses = np.array([U._compute_peptide_mass_from_seq(seqs[j]) for j in range(len(peptides_alpha)) ])
 
-                prosit_out = self.prosit_predictor.predict(sequences=peptides_int, 
-                                              charges=[int(c) for c in charges], 
-                                              collision_energies=[prosit_ce]*len(peptides_int), 
-                                              models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
+                prosit_out = self.get_prosit_output(peptides_int, charges, prosit_ce)
                 prosit_output = {'fragmentmz': prosit_mzs, 'intensity': prosit_ints, 'annotation':prosit_anno}
                 prosit_mzs, prosit_ints, prosit_anno =  prosit_out['fragmentmz'], prosit_out['intensity'], prosit_out['annotation']
 
