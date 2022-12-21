@@ -36,9 +36,16 @@ from genetic_algorithm.input_from_csv import process_input
 class Spectralis():
     
     def __init__(self, config_path):
-        print('Loading config file:', config_path)
-        self.config = yaml.load(open(config_path), Loader=yaml.FullLoader) # load model params  
-        #print(self.config)
+        if isinstance(config_path,str): 
+            print('Loading config file:', config_path)
+            self.config = yaml.load(open(config_path), Loader=yaml.FullLoader) # load model params  
+        else:
+            self.config = config_path
+        
+        print(self.config)
+            
+            
+            
         self.verbose = self.config['verbose']
         
         self.prosit_predictor = self._init_prosit_predictor()
@@ -153,7 +160,7 @@ class Spectralis():
                                   precursor_z_col = 'charge',  precursor_mz_col = 'prec_mz',
                                   exp_ints_col = 'exp_ints', exp_mzs_col = 'exp_mzs', 
                                   peptide_mq_col = 'peptide_mq',  lev_col = 'Lev_combined',
-                                   chunk_size=None, chunk_offset=None,
+                                   chunk_size=None, chunk_offset=None, random_subset=None,
                                   ):
         
         _input = process_input(path=csv_path,
@@ -161,11 +168,11 @@ class Spectralis():
                                precursor_z_col=precursor_z_col, precursor_mz_col=precursor_mz_col,
                                exp_ints_col=exp_ints_col, exp_mzs_col=exp_mzs_col, 
                                peptide_mq_col=peptide_mq_col, lev_col=lev_col,
-                               chunk_size=chunk_size, chunk_offset=chunk_offset
+                               chunk_size=chunk_size, chunk_offset=chunk_offset, random_subset=random_subset
                               )
         scans, precursor_z,  padded_seqs,  precursor_m,  exp_mzs,  exp_intensities, padded_mq_seqs, levs = _input
                       
-        self.genetic_algorithm(seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, prosit_ce, out_path)
+        self.genetic_algorithm(padded_seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, prosit_ce, out_path)
         
     def genetic_algorithm_from_csv_in_chunks(self, csv_path, prosit_ce, out_path, chunk_size,
                                              peptide_col = 'peptide_combined', scans_col = 'merge_id',
@@ -190,6 +197,7 @@ class Spectralis():
         
         df_out = pd.concat([pd.read_csv(f'{out_dir}/tmp_chunk_{chunk}_ga_out.csv') for chunk in n_chunks])
         df_out.to_csv(out_path, index=None)        
+        
         
         
     def genetic_algorithm(self, seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, prosit_ce, out_path):
@@ -236,7 +244,7 @@ class Spectralis():
     def rescoring_from_csv(self, input_path,
                            peptide_col, precursor_z_col, prosit_ce, 
                            exp_mzs_col, exp_ints_col, precursor_mz_col, 
-                           out_path=None
+                           out_path=None, return_features=False
                           ):
         
         df = pd.read_csv(input_path)
@@ -274,7 +282,14 @@ class Spectralis():
         exp_ints = np.array([np.pad(seq, (0,len_padded-len(seq)), 'constant', constant_values=(0,0)) for seq in exp_ints])
     
         print(f'Getting scores for {len(padded_seqs)} PSMs')
-        df[f'Spectralis_score'] = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m)
+        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
+        
+        if return_features:
+            scores = rescoring_out[0]
+            features = rescoring_out[1]
+        else:
+            scores = rescoring_out
+        df[f'Spectralis_score'] = scores
         
         #df = pd.concat([df, df_notHandled], axis=0).reset_index(drop=True)
         df.drop(columns=['peptide_int', 'seq_len'], inplace=True)
@@ -282,7 +297,10 @@ class Spectralis():
         if out_path is not None:
             df.to_csv(out_path)
                 
-        return df
+        if return_features:
+            return df, features
+        else:
+            return df
         
     def get_prosit_output(self, seqs, charges, prosit_ce):
         return self.prosit_predictor.predict(sequences=seqs, 
@@ -291,7 +309,7 @@ class Spectralis():
                                       models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
         
     
-    def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs):
+    def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_features=False):
                 
         if self.scorer is None:
             self.scorer = self._init_scorer()  
@@ -311,7 +329,7 @@ class Spectralis():
                                                         )
         y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs = binreclass_out
 
-        return self.scorer.get_scores(exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_changes)
+        return self.scorer.get_scores(exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_changes, return_features=return_features)
     
     def bin_reclassification_from_csv(self):
         return

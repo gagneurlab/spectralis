@@ -194,6 +194,7 @@ def _get_abs_diff(observed_intensities, predicted_intensities, charge, normalize
             predicted_intensities = scipy.sparse.csr_matrix(predicted_intensities)
             observed_intensities = observed_intensities.multiply(boolean_array).toarray()
             predicted_intensities = predicted_intensities.multiply(boolean_array).toarray()
+        
         means, stds, Q3,Q2,Q1,maxs,mins, mses,dots = [],[],[],[],[],[],[],[],[]
         for obs, pred in zip(observed_intensities, predicted_intensities):
             valid_ion_mask = pred > EPSILON
@@ -247,12 +248,8 @@ def get_all_features(exp_int, theo_int):
 
     res_pearson = np.stack(cases_output).reshape(-1, exp_int.shape[0],order='F')
     
-
-
-    cases = [(0, False),(4, False),(5, False),(0, True),(4, True),(5, True)]
     
     cases_output = Parallel(n_jobs = -1)(delayed(_get_cos)(exp_int.copy(), theo_int.copy(), case[0], case[1]) for case in cases)
-    
     res_cos = np.stack(cases_output).reshape(-1, exp_int.shape[0],order='F')
 
     

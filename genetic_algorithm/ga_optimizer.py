@@ -16,6 +16,10 @@ from joblib import Parallel, delayed
 from denovo_utils import __utils__ as U
 from denovo_utils import __constants__ as C
 
+
+import sys
+import os
+sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/genetic_algorithm'))
 from seq_initializer import SequenceGenerator
 
 
@@ -38,7 +42,6 @@ class GAOptimizer():
                  max_score_thres=-1.0,
                  min_score_thres=-2.0,
                                   
-                 out_dir=None,
                  write_pop_to_file=False,
                  num_cores=-1,
                  with_cache=True, 
@@ -68,10 +71,7 @@ class GAOptimizer():
         self.MIN_INTENSITY = min_intensity
         self.N_GENERATIONS = n_generations
         self.ELITE_SIZE = int(self.FIX_TOP_RATIO*self.POP_SIZE)
-        
-        self.OUT_DIR = out_dir
-        
-        
+             
         
         self.verbose = verbose
         self.with_cache = with_cache
@@ -373,7 +373,7 @@ class GAOptimizer():
                                    })
             df_temp.to_csv(f'./tmp/GEN{gen_num}_lineage_tracking.csv', index=None)
         
-        print(f'--- Elapsed time building new populations: {timedelta(seconds=timer()-start_new_pops)}, shape: {all_new_populations.shape}, {self.using("mem")}')
+        print(f'--- Elapsed time building new populations: {timedelta(seconds=timer()-start_new_pops)}, shape: {all_new_populations.shape}')
         
                          
         ## Add initial seqs and scans and elite population
@@ -397,12 +397,12 @@ class GAOptimizer():
         
         #for temp_var in [all_new_populations, cache_ids]:
         #    print('=== ', self.retrieve_name(temp_var), temp_var.shape)
-        print(f'--- Elapsed time finalizing new populations: {timedelta(seconds=timer()-start_new_pops)}, shape: {all_new_populations.shape}, mem{self.using("")}')
+        print(f'--- Elapsed time finalizing new populations: {timedelta(seconds=timer()-start_new_pops)}, shape: {all_new_populations.shape}')
         
         return all_new_populations, all_unique_counts, cache_ids
     
     def run_optimization(self, initial_seqs, precursor_z, precursor_m, scans,
-                         exp_mzs, exp_intensities):
+                         exp_mzs, exp_intensities, out_path=None):
         
         out_determined = self.determine_passed_not_passed( initial_seqs, precursor_z, precursor_m, scans,
                                                             exp_mzs, exp_intensities)
@@ -418,7 +418,7 @@ class GAOptimizer():
                 continue            
             
             print(f'--- Elapsed time in generation {gen-1}: {timedelta(seconds=timer()-start_gen)}')
-            print(f'--- Total elapsed time: {timedelta(seconds=timer()-start)}, {self.using("mem")}')
+            print(f'--- Total elapsed time: {timedelta(seconds=timer()-start)}')
             start_gen = timer()
         
             print(f'========== GEN {gen} ============= ')
@@ -443,7 +443,7 @@ class GAOptimizer():
             ## Prosit preds
             start_prosit = timer()
             prosit_mzs, prosit_ints, prosit_anno = self.get_prosit_output(all_populations, all_charges )
-            print(f'--- Elapsed time for collecting prosit preds: {timedelta(seconds=timer()-start_prosit)}, {self.using("mem")}')
+            print(f'--- Elapsed time for collecting prosit preds: {timedelta(seconds=timer()-start_prosit)}')
             #for temp_var in [prosit_mzs, prosit_ints]:
             #    print('=== ', self.retrieve_name(temp_var), temp_var.shape)
                 
@@ -458,7 +458,7 @@ class GAOptimizer():
                                                           precursor_mz=all_precursor_mzs,
                                                         )
             y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs = binreclass_out
-            print(f'--- Elapsed time for collecting P2P preds: {timedelta(seconds=timer()-start_p2p)}, {self.using("mem")}')
+            print(f'--- Elapsed time for collecting P2P preds: {timedelta(seconds=timer()-start_p2p)}')
             #for temp_var in [y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs]:
             #    print('=== ', self.retrieve_name(temp_var), temp_var.shape)
 
@@ -472,15 +472,22 @@ class GAOptimizer():
                                                                 y_change_bin_probs = y_changes
 
                                             )
-            print(f'--- Elapsed time for collecting scores: {timedelta(seconds=timer()-start_scoring)}, {self.using("mem")}. Shape: ', population_scores.shape)
+            print(f'--- Elapsed time for collecting scores: {timedelta(seconds=timer()-start_scoring)}. Shape: ', population_scores.shape)
             #print('Scores-cache size:', len(self.scores_cache))
             
             ### Write results of gen-1 to file 
-            if (self.OUT_DIR is not None):
-                timestamp = time.strftime('%Y%m%d_%H%M', time.localtime())
-                out_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_ga_out.csv'
-                pop_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_ga_pop.csv'
-                self.write_to_file(out_path, cache_ids, df_init, pop_path)
+            if out_path is not None:
+                #timestamp = time.strftime('%Y%m%d_%H%M', time.localtime())
+                #out_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_ga_out.csv'
+                #pop_path = f'{self.OUT_DIR}/{timestamp}__GEN{gen-1}_ga_pop.csv'
+                pop_path = None
+                
+                if gen==self.N_GENERATIONS+1:
+                    self.write_to_file(out_path, cache_ids, df_init, pop_path)
+                else:
+                    current_out = '.'.join(out_path.split('.')[:-1]) + f'__gen{gen-1}.' + out_path.split('.')[-1]
+                    print('current_out')
+                    self.write_to_file(current_out, cache_ids, df_init, pop_path)
 
             if gen==self.N_GENERATIONS+1:
                 print(f'FINISHED WITH {self.N_GENERATIONS} GENERATIONS!!')

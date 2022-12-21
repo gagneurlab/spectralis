@@ -5,7 +5,7 @@ from numpy.random import RandomState
 from denovo_utils import __utils__ as U
 from denovo_utils import __constants__ as C
 
-def process_input(path, start_idx=None, sample_size=10000,
+def process_input(path, chunk_offset=None, chunk_size=None,
                   peptide_col = 'peptide_combined', scans_col = 'merge_id',
                   precursor_z_col = 'charge',  precursor_mz_col = 'prec_mz',
                   exp_ints_col = 'exp_ints', exp_mzs_col = 'exp_mzs', 
@@ -29,10 +29,10 @@ def process_input(path, start_idx=None, sample_size=10000,
 
 
     print(df.shape)
-    if start_idx is not None:
+    if chunk_size is not None:
         df = df.reset_index(drop=True)
-        start_idx = int(start_idx)
-        end_idx = min(len(df), start_idx+sample_size)
+        start_idx = chunk_offset*chunk_size
+        end_idx = min(len(df), start_idx+chunk_size)
         df = df.iloc[start_idx:end_idx]
         df = df.reset_index(drop=True)
         

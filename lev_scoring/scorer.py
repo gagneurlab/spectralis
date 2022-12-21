@@ -34,10 +34,13 @@ class PSMLevScorer():
             pickle_model = pickle.load(file)
         return pickle_model
     
-    def get_scores(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_change_bin_probs):
+    def get_scores(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_change_bin_probs, return_features=False):
         
         features = self._get_features(exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_change_bin_probs)
-        return -self.scorer.predict(features)
+        if return_features:
+            return -self.scorer.predict(features), features
+        else:
+            return -self.scorer.predict(features)
     
     def _get_p2p_features(self, _change_probs):
         p2p_features = []

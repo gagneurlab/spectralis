@@ -178,6 +178,42 @@ class SequenceGenerator:
             new_seq, changes = self.get_modified_seq(splitted_seq, candidate, idx, seq)
             return new_seq, idx, delta_mass_interval, changes
 
+        
+    
+    def get_modified_seq(self, splitted_seq, candidate, idx, seq):
+        """ Given the sequence, the candidate and the placeholders idx for substitution place build possible new sequences """
+        n_groups = idx.shape[0]
+        divided_candidates = self.smart_permutation(candidate, n_groups) ## one permutation per candidate for now
+
+        new_seq = splitted_seq[0]
+        for j in range(1,len(idx)+1): # concatenate candidate parts with splitted sequence parts
+            new_seq = np.concatenate([new_seq, divided_candidates[j-1], splitted_seq[j][1:]])
+
+        changes = list(zip(seq[idx], divided_candidates)) # TODO Change this! no zip but np.arrays... For testing: one seq one candidate gives list of changes 
+        return new_seq, changes   
+    
+    def smart_permutation(self, data, n_groups):
+        """ Randomly assign elements of list to at most n groups with random permutation of the elements in the list.
+            Designed to assign elements of the substitution candidate to the placeholders of the original sequence selected for substitution """ 
+        # Randomly choose number of intervals
+        data = data[data!=0]
+        P = len(data)
+        data = np.random.permutation(data) # Randomly permute elements in data
+
+        result = [np.array([], dtype=int) for _ in range(n_groups)]
+        I = random.randrange(1, min(n_groups, P)+1) # Randomly select number of groups with >0 elements
+        if P>1:
+            # randomly split data  into chose number of intervals
+            split_points = sorted(np.random.choice(P-1, I - 1, replace=False) + 1)
+            result[:I] = np.split(data, split_points)
+            result = list(np.random.permutation(result)) # permute to assign groups to positions
+            #print("Split into {} intervals: {}".format(I, result))
+        else: # Only one residue in candidate , i.e. P=1
+            result[0] = data 
+            result = list(np.random.permutation(result))
+        #print(result)
+        return result
+    
     def perform_operation(self, seq, delta_mass_interval, perm_type, start_pos=None, end_pos=None):
         
         #print(start_pos, end_pos, seq)
