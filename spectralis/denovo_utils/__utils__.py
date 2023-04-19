@@ -1,4 +1,6 @@
-from denovo_utils import __constants__ as C
+#from denovo_utils import __constants__ as C
+from . import __constants__ as C
+
 import numpy as np
 
 import pickle

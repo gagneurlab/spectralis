@@ -13,8 +13,8 @@ from torch.utils.data.dataloader import DataLoader
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
-from datasets import BinReclassifierDataset_eval, BinReclassifierDataset
+#sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
+from .datasets import BinReclassifierDataset_eval, BinReclassifierDataset
 
 class BinReclassifier():
     

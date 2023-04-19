@@ -13,14 +13,14 @@ from grpc._channel import _Rendezvous
 import itertools
 from joblib import Parallel, delayed
 
-from denovo_utils import __utils__ as U
-from denovo_utils import __constants__ as C
+from ..denovo_utils import __utils__ as U
+from ..denovo_utils import __constants__ as C
 
 
 import sys
 import os
 sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/genetic_algorithm'))
-from seq_initializer import SequenceGenerator
+from .seq_initializer import SequenceGenerator
 
 
 class GAOptimizer():

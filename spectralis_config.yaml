@@ -14,7 +14,7 @@ aa_mass_lookup_path: '/s/project/denovo-prosit/DanielaAndrade/1_datasets/Hela_in
 
 
 ### BIN RECLASSIFICATION
-BATCH_SIZE: 2048
+BATCH_SIZE: 256
 
 BIN_RESOLUTION: 1
 MAX_MZ_BIN: 2000
@@ -34,6 +34,10 @@ log_transform: False
 sqrt_transform: False
 add_leftmost_rightmost: True
 
+## training params
+focal_loss: True
+learning_rate: 0.00004 #4e-5
+n_epochs: 30
 
 ### GUIDED MUTATIONS
 bin_prob_threshold: 0.35

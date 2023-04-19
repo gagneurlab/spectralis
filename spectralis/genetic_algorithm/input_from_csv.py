@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from numpy.random import RandomState
 
-from denovo_utils import __utils__ as U
-from denovo_utils import __constants__ as C
+from ..denovo_utils import __utils__ as U
+from ..denovo_utils import __constants__ as C
 
 def process_input(path, chunk_offset=None, chunk_size=None,
                   peptide_col = 'peptide_combined', scans_col = 'merge_id',

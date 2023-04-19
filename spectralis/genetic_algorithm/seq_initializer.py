@@ -12,8 +12,8 @@ import random
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 
-from denovo_utils import __constants__ as C
-from denovo_utils import __utils__ as U 
+from ..denovo_utils import __constants__ as C
+from ..denovo_utils import __utils__ as U 
 
 class SequenceGenerator:
     def __init__(self, lookup_table: Union[str, pd.Series],

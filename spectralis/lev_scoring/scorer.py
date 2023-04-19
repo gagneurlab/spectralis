@@ -11,8 +11,8 @@ import pickle
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/lev_scoring'))
-import ms2_comparison
+#sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/lev_scoring'))
+from . import ms2_comparison
 
 class PSMLevScorer():
     

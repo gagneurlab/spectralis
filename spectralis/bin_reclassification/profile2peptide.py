@@ -11,8 +11,8 @@ from denovo_utils import __constants__ as C
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
-from ms2_binning import get_binning, get_bins_assigments
+#sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
+from .ms2_binning import get_binning, get_bins_assigments
 
 import collections
  
@@ -267,7 +267,36 @@ class Profile2Peptide:
         adjacency_matrix[-1, -1] = 1.
         return adjacency_matrix, y_mz_bins
     
-    def get_peptides_fromAdjMat(self, adjacency_matrix, y_mz_bins, num_peptides=5):
+    def get_peptide_fromLongestPath(self, adjacency_matrix, y_mz_bins):
+        #print(adjacency_matrix.shape) ## #nodes, #nodes
+        G =nx.from_numpy_matrix(adjacency_matrix, create_using=nx.DiGraph)
+        #print('Matrix', adjacency_matrix)
+        
+        ### remove self edges
+        G.remove_edges_from(list(nx.selfloop_edges(G)))
+        #print('G edges', G.edges)
+        
+        path = nx.dag_longest_path(G, weight='weight')
+        #print('Path', path)
+        all_aa_masses = np.diff(y_mz_bins[path], axis=0)
+        #print('aa masses', all_aa_masses)
+        
+        all_peptides = self.aa_vectorized[all_aa_masses ]
+        #print('Peptide int', all_peptides)
+        all_peptides = self.fix_same_bin(all_peptides) ## fix cases where AAs land on the same bin e.g Q and K with binres =1
+        #print('Peptide int fixed')
+        
+        # zeros to the end
+        #print(all_peptides[:2])
+        mask = all_peptides!=0
+        out = np.zeros_like(all_peptides)
+        out[mask] = all_peptides[::-1][mask[::-1]]
+        all_peptides = out
+        #print(all_peptides[:2])
+        #print('Peptide int masked', all_peptides)
+        return all_peptides
+    
+    def get_peptides_fromAdjMat(self, adjacency_matrix, y_mz_bins):
         all_paths = []
         next_matrix = np.concatenate([np.ones((1, num_peptides)),
                         np.zeros((adjacency_matrix.shape[0] - 1, num_peptides))]).T
@@ -312,6 +341,38 @@ class Profile2Peptide:
             replacement = np.random.choice(self.conflict_aas[aa], num_replace, replace=True)
             all_peptides[idx] = replacement
         return all_peptides
+    
+    def get_profile2peptide_longestPath(self, pepmass, y_mz_bins, y_probs,
+                             b_mz_bins=None, b_probs=None, 
+                             y_mz_input=None, b_mz_input=None,
+                             current_seq=None,  
+                             fix_len=30, ):
+        
+        concat_y_mz_bins, concat_y_probs = self.concat_bins_probs(pepmass, y_mz_bins, y_probs, b_mz_bins, b_probs, 
+                                                                  y_mz_input, b_mz_input)
+        temp_vars = [concat_y_mz_bins, concat_y_probs]
+        #for temp_var in temp_vars:
+        #    print('=== ', self.retrieve_name(temp_var), temp_var)
+        
+        adjacency_matrix, reachable_y_mz_bins = self.build_spectrum_graph(concat_y_mz_bins, concat_y_probs)
+        
+        if adjacency_matrix is None:
+            #print(f'IDX {idx} Could not find adj matrix...')
+            new_peptide = np.zeros((30,)).astype(int) if current_seq is None else current_seq
+        
+        else:
+                
+            new_peptide = self.get_peptide_fromLongestPath(adjacency_matrix, reachable_y_mz_bins)
+            if (fix_len is not None) and ( fix_len-new_peptide.shape[0]>0 ):
+                #print('padding')
+                new_peptide = np.pad(new_peptide, (0, fix_len-new_peptide.shape[0]), 'constant', constant_values=0) 
+
+            if (fix_len is not None) and (current_seq is not None) and (new_peptide.shape[0]>fix_len):
+                new_peptide = current_seq
+
+        return new_peptide
+        
+    
     
     def get_profile2peptides(self, pepmass, y_mz_bins, y_probs,
                              b_mz_bins=None, b_probs=None, 

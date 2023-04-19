@@ -15,23 +15,37 @@ import yaml
 import numpy as np
 import pandas as pd
 import h5py
+import time
+import copy
+import tqdm
+import os
 
 import torch
 
-from denovo_utils import __constants__ as C
-from denovo_utils import __utils__ as U
+from .denovo_utils import __constants__ as C
+from .denovo_utils import __utils__ as U
 
 from prosit_grpc.predictPROSIT import PROSITpredictor
 
-from bin_reclassification.peptide2profile import Peptide2Profile
-from bin_reclassification.profile2peptide import Profile2Peptide
-from bin_reclassification.models import P2PNetPadded2dConv
-from bin_reclassification.bin_reclassifier import BinReclassifier
+from .bin_reclassification.peptide2profile import Peptide2Profile
+from .bin_reclassification.profile2peptide import Profile2Peptide
+from .bin_reclassification.models import P2PNetPadded2dConv
+from .bin_reclassification.bin_reclassifier import BinReclassifier
 
-from lev_scoring.scorer import PSMLevScorer
 
-from genetic_algorithm.ga_optimizer import GAOptimizer
-from genetic_algorithm.input_from_csv import process_input
+from .bin_reclassification.datasets import BinReclassifierDataset, BinReclassifierDataset_multiple
+from .bin_reclassification.models import WeightedFocalLoss
+
+from torch.cuda.amp import GradScaler, autocast
+from torch.utils.data.dataloader import DataLoader
+import torch.nn as nn
+import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+from .lev_scoring.scorer import PSMLevScorer
+
+from .genetic_algorithm.ga_optimizer import GAOptimizer
+from .genetic_algorithm.input_from_csv import process_input
 
 class Spectralis():
     
@@ -229,17 +243,92 @@ class Spectralis():
         optimizer.run_optimization(seqs, precursor_z, precursor_m, scans, exp_mzs, exp_intensities, out_path)
         
     
-    def rescoring_from_csv_mgf(self, csv_paths, mgf_paths, scan_id_col, peptide_col, 
-                               precursor_z_key, precursor_mz_key, exp_mzs_key, exp_ints_key,
-                               prosit_ce, out_path=None):
-        ## TODO: get peptide seqs from csv and prec_mz, prec_z, exp_ints, exp_mzs from mgf_files
+    def rescoring_from_csv_mgf(self, csv_paths, mgf_paths, prosit_ce, peptide_col, 
+                               scan_id_col_mgf='scans', scan_id_col_csv='',
+                               precursor_z_key='charge', precursor_mz_key='pepmass', exp_mzs_key='m/z array', exp_ints_key='intensity array',
+                               out_path=None, return_features=False):
+        
+        ## get prec_mz, prec_z, exp_ints, exp_mzs from mgf_files
+        from pyteomics import mgf, auxiliary
+        
+        exp_ints = []
+        exp_mzs = []
+        precursor_m = []
+        precursor_z = []
+        ids = []
+        for path in mgf_paths:
+            with mgf.MGF(path) as reader:
+                for spectrum in tqdm.tqdm(reader):
+                    exp_ints.append( spectrum[exp_ints_key] )
+                    exp_mzs.append( spectrum[exp_mzs_key] )
+                    ids.append( f"{os.path.basename(path).replace('.mgf', '')}__{spectrum['params'][scan_id_col_mgf]}" )
+                    precursor_m.append( spectrum['params'][precursor_mz_key][0] )
+                    precursor_z.append( spectrum['params'][precursor_z_key][0] )
+                    
+        
+        precursor_m = np.array(precursor_m)
+        precursor_z = np.array(precursor_z)
+        exp_ints = np.array(exp_ints)
+        exp_mzs = np.array(exp_mzs)
+        ids = np.array(ids)
+        
+        for x in [precursor_m, precursor_z, exp_ints, exp_mzs, ids]:
+            print(x.shape, x[0], x[0].dtype)
+        
+        ## get peptide seqs from csv 
         df = pd.concat([pd.read_csv(path) for path in csv_paths], axis=0).reset_index(drop=True)
+        df = df[df[peptide_col].notnull()]
+        df = df[~ (df[peptide_col].str.contains('\+'))  ] ## assign these sequences lowest scores?
+        df[peptide_col] = (df[peptide_col].apply(lambda s: s.strip()
+                                                            .replace('L', 'I')
+                                                            .replace('(Cam)', 'C')
+                                                            .replace('OxM', 'Z')
+                                                            .replace('M(O)', 'Z')
+                                                            .replace('M(ox)', 'Z')
+                                                ) )
         
-        padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m = None
-        scores = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m)
+        df["peptide_int"] = df[peptide_col].apply(U.map_peptide_to_numbers)
+        df["seq_len"] = df["peptide_int"].apply(len)
+        
+        df_notHandled = df[~(df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
+        df_notHandled['Spectralis_score'] = np.NINF # lowest possible score
+        
+        df = df[(df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
+        df = df.reset_index()
         
         
-        return df
+        
+        sequences = np.array([np.asarray(x) for x in df["peptide_int"]]).flatten()
+        padded_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
+        
+        
+
+        
+        
+        
+        
+        ## get scores
+        print(f'Getting scores for {len(padded_seqs)} PSMs')
+        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
+        
+        if return_features:
+            scores = rescoring_out[0]
+            features = rescoring_out[1]
+        else:
+            scores = rescoring_out
+        df[f'Spectralis_score'] = scores
+        
+        df = pd.concat([df, df_notHandled], axis=0).reset_index(drop=True)
+        df.drop(columns=['peptide_int', 'seq_len'], inplace=True)
+        
+        if out_path is not None:
+            df.to_csv(out_path)
+                
+        if return_features:
+            return df, features
+        else:
+            return df
+        
     
     def rescoring_from_csv(self, input_path,
                            peptide_col, precursor_z_col, prosit_ce, 
@@ -309,6 +398,11 @@ class Spectralis():
                                       models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
         
     
+    def rescoring_novor(novor_out_path):
+        ##prepro
+        seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs = self.prepro_novor(novor_out_path)
+        scores = self.rescoring(seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_features=False)
+        
     def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_features=False):
                 
         if self.scorer is None:
@@ -420,7 +514,8 @@ class Spectralis():
     ### BIN RECLASS TRAINING
     def train_bin_reclassifier(self, train_dataset_paths, val_dataset_paths, prosit_ce,
                             peptide_key='peptide_int', precursor_z_key='charge', precursor_mz_key='precursor_mz',
-                            exp_mzs_key='exp_mzs_full', exp_ints_key='exp_intensities_full', peptide_true_key='peptide_int_true'):
+                            exp_mzs_key='exp_mzs_full', exp_ints_key='exp_intensities_full', peptide_true_key='peptide_int_true',
+                              run_name='bin_reclass_model', out_dir='.'):
         
         ### Datasets
         datasets = {'train': train_dataset_paths, 'val': val_dataset_paths}
@@ -434,35 +529,116 @@ class Spectralis():
                                                                                                                         exp_mzs_key, 
                                                                                                                         exp_ints_key, 
                                                                                                                         peptide_true_key)
-                peptide_masses = np.array([U._compute_peptide_mass_from_seq(seqs[j]) for j in range(len(peptides_alpha)) ])
-
-                prosit_out = self.get_prosit_output(peptides_int, charges, prosit_ce)
-                prosit_output = {'fragmentmz': prosit_mzs, 'intensity': prosit_ints, 'annotation':prosit_anno}
-                prosit_mzs, prosit_ints, prosit_anno =  prosit_out['fragmentmz'], prosit_out['intensity'], prosit_out['annotation']
-
+                
+                
+                peptide_masses = np.array([U._compute_peptide_mass_from_seq(peptides_int[j]) for j in range(len(peptides_int)) ])
+                prosit_output = self.get_prosit_output(peptides_int, charges, prosit_ce)
+                
+                peptide_masses_true = np.array([U._compute_peptide_mass_from_seq(peptides_true_int[j]) for j in range(len(peptides_true_int)) ])
+                prosit_output_true = self.get_prosit_output(peptides_true_int, charges, prosit_ce)
+                
                 current_dataset = BinReclassifierDataset(self.peptide2profiler, prosit_output, peptide_masses,
-                                                               exp_mzs, exp_int, precursor_mzs,
-                                                               peptides_true_int, charges,
+                                                               exp_mzs, exp_ints, precursor_mzs,
+                                                               prosit_output_true, peptide_masses_true
                                                         )
+               
+                
                 all_datasets.append(current_dataset)
-            datasets[dataset_type] = None ## TODO: concatenate all current_datasets
-
+            datasets[dataset_type] = BinReclassifierDataset_multiple(all_datasets)
+        
+        print('Train size: ', len(datasets['train']), 'Val size: ', len(datasets['val']))
+        
         dataloader_train = DataLoader(dataset=datasets["train"], batch_size=self.config["BATCH_SIZE"]*torch.cuda.device_count(), 
                                       shuffle=True, num_workers=8, pin_memory=True)
         dataloader_val = DataLoader(dataset=datasets["val"], batch_size=self.config["BATCH_SIZE"]*torch.cuda.device_count(), 
                                     shuffle=True, pin_memory=True)
         
-        num_train_batch = int(np.ceil(len(train_dataset) / self.config["BATCH_SIZE"]))
-        num_val_batch = int(np.ceil(len(test_dataset) / self.config["BATCH_SIZE"]))
+        num_train_batch = int(np.ceil(len(datasets["train"]) / self.config["BATCH_SIZE"]))
+        num_val_batch = int(np.ceil(len(datasets["val"]) / self.config["BATCH_SIZE"]))
             
         ### Model
         model = self._init_binreclass_model(load_from_checkpoint=False)
         model.train()
+       
         
-        from torch.cuda.amp import GradScaler, autocast
-        from torch.utils.data.dataloader import DataLoader
-        
+        ### Loss fn
+        weights = np.zeros((datasets["train"].peptide_profiles.shape[1], ))
+        for c in range(weights.shape[0]):
+            y_c = datasets["train"].peptide_profiles[:, c, :]
+            weights[c] = y_c.flatten().shape[0] / y_c[y_c>0].shape[0]
+        weights = torch.as_tensor(weights)
+        #weights = torch.as_tensor([144.3010, 143.4191])
+        if self.config['focal_loss']:
+            loss_fn = WeightedFocalLoss(weight=weights, gamma=2)
+        else:
+            loss_fn = nn.BCEWithLogitsLoss(pos_weight=weights.to(self.device))
+        loss_fn.to(self.device)
+        optimizer = optim.Adam(model.parameters(), lr=self.config['learning_rate'])
+        scheduler = ReduceLROnPlateau(optimizer, 'min', patience = 2)
         scaler = GradScaler()
+
+        t = time.localtime()
+        timestamp = time.strftime('%Y%m%d_%H%M', t)
+
+        ####### TRAINING LOOP #######
+        min_val_loss = np.inf
+        for i in range(self.config["n_epochs"]):
+            n = 1
+            total_loss = 0
+            total_acc = 0
+            total_duration = 0
+            t0 = time.time()
+            total_timesteps = len(dataloader_train)
+
+
+            for local_batch, local_y in dataloader_train:
+                model.zero_grad()
+
+                X,y = local_batch.to(self.device), local_y.float().to(self.device)
+                with autocast():
+                    outputs = model(X)
+                    loss = loss_fn(outputs[:,:y.shape[1],:].permute(0, 2, 1), y.permute(0, 2, 1)) # nur auf y>0 across dims
+
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+
+                total_loss += loss.item()
+
+                duration = time.time() - t0
+                total_duration += duration
+                total_duration = round(total_duration, 2)
+                estimated_duration_left = round((total_duration / n) * (total_timesteps), 2)
+                print(f"\r Epochs {i+1} - Loss: {total_loss/n} - Batch: {n} / {num_train_batch} - Dur: {total_duration}s/{estimated_duration_left}s", end="")
+                n+=1
+                t0 = time.time()
+
+            
+            print("\n")
+            ### VALIDATION
+            n = 1
+            total_loss = 0
+            total_acc = 0
+            with torch.no_grad():
+                model.eval()  
+                for local_batch, local_y in dataloader_val:
+                    X,y = local_batch.to(self.device), local_y.float().to(self.device)
+                    outputs = model(X)
+
+                    loss = loss_fn(outputs[:,:y.shape[1],:].permute(0, 2, 1), y.permute(0, 2, 1))
+                    total_loss += loss.item()
+                    print(f"\r Epochs {i+1} - Val_loss: {total_loss/n}  - Batch: {n} / {num_val_batch} ", end="")
+                    n+=1
+                
+                scheduler.step(total_loss)
+                if total_loss < min_val_loss:
+                    print('\n\tModel improved\n')
+                    torch.save(model.state_dict(), f"{out_dir}/{run_name}_{timestamp}_epoch{i}.pt")
+                    best_model = copy.deepcopy(model)
+                    min_val_loss = total_loss
+                    
+            model.train()
+            print("\n---")      
         
 
 

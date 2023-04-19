@@ -10,8 +10,8 @@ import torch.jit as jit
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
-from ms2_binning import get_bins_assigments
+#sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
+from .ms2_binning import get_bins_assigments
        
 
 AA_MZ = ODict({'G': 57.021464,
@@ -187,7 +187,7 @@ class P2PNetPadded2dConv(nn.Module):
         return x_end
 
 class WeightedFocalLoss(nn.Module):
-    """Implementation of Facal Loss"""
+    """Implementation of Focal Loss"""
     def __init__(self, weight=None, gamma=2, reduction="mean"):
         super(WeightedFocalLoss, self).__init__()
         self.weighted_cs = nn.BCEWithLogitsLoss(weight=weight, reduction="none")
