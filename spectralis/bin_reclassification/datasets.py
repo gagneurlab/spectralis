@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 import pickle
-from denovo_utils import __utils__ as U
+from ..denovo_utils import __utils__ as U
 import random
 
 import sys
