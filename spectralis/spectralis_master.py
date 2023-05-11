@@ -360,7 +360,7 @@ class Spectralis():
         precursor_z = np.array(list(df[precursor_z_col]))      
         precursor_m = np.array([np.asarray(x) for x in df[precursor_mz_col]])
 
-        sequences = np.array([np.asarray(x) for x in df["peptide_int"]]).flatten()
+        sequences = [np.asarray(x) for x in df["peptide_int"]]
         padded_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
         
         exp_mzs = np.array(df[exp_mzs_col].apply(lambda x: np.array([float(el) for el in x.replace('[', '').replace(']', '').replace(' ', '').split(",")])))
