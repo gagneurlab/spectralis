@@ -168,17 +168,17 @@ class BinReclassifier():
                 
 
             if ion_type==0:
-                y_probs = np.array(probs_sparse)
-                y_mz_probs = np.array(mz_probs_sparse)
-                y_mz_inputs = np.array(mz_inputs_sparse)
+                y_probs = np.array(probs_sparse, dtype=object)
+                y_mz_probs = np.array(mz_probs_sparse, dtype=object)
+                y_mz_inputs = np.array(mz_inputs_sparse, dtype=object)
                 
-                y_changes = np.array(changes_sparse)
-                y_mz_changes = np.array(mz_changes_sparse)  
+                y_changes = np.array(changes_sparse, dtype=object)
+                y_mz_changes = np.array(mz_changes_sparse, dtype=object)  
                 
             else:
-                b_probs = np.array(probs_sparse)
-                b_mz_probs = np.array(mz_probs_sparse)
-                b_mz_inputs = np.array(mz_inputs_sparse)
+                b_probs = np.array(probs_sparse, dtype=object)
+                b_mz_probs = np.array(mz_probs_sparse, dtype=object)
+                b_mz_inputs = np.array(mz_inputs_sparse, dtype=object)
 
                 
                 

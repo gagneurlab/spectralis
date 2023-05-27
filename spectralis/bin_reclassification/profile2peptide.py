@@ -7,7 +7,7 @@ import itertools
 import networkx as nx
 from collections import OrderedDict as ODict
 
-from denovo_utils import __constants__ as C
+from ..denovo_utils import __constants__ as C
 
 import sys
 import os
