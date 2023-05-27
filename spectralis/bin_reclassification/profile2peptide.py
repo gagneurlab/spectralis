@@ -296,7 +296,7 @@ class Profile2Peptide:
         #print('Peptide int masked', all_peptides)
         return all_peptides
     
-    def get_peptides_fromAdjMat(self, adjacency_matrix, y_mz_bins):
+    def get_peptides_fromAdjMat(self, adjacency_matrix, y_mz_bins, num_peptides=5, get_path_scores=False):
         all_paths = []
         next_matrix = np.concatenate([np.ones((1, num_peptides)),
                         np.zeros((adjacency_matrix.shape[0] - 1, num_peptides))]).T
@@ -308,7 +308,22 @@ class Profile2Peptide:
             all_paths.append(next_matrix.nonzero()[1])
         
         all_paths = np.vstack(all_paths).T
-        #print('all_paths', all_paths[1])
+        
+        ####### path scores
+        if get_path_scores:
+            #print('all_paths', all_paths.shape, all_paths[0])
+            #print('adjMat',adjacency_matrix.shape, adjacency_matrix )
+        
+            path_scores = []
+            for i in range(all_paths.shape[0]):
+                ## one score for each path
+                path = all_paths[i]
+                cum_sum = 0
+                for j in range(len(path)-1):
+                    cum_sum += adjacency_matrix[path[j], path[j+1]]
+                path_scores.append(cum_sum)
+            path_scores = np.array(path_scores)
+            #print(path_scores)
         #for temp_i in range(10):
         #    print('--')
         #    print('y_mz_bins[all_paths]', np.unique(y_mz_bins[all_paths], axis=0)[temp_i])
@@ -329,8 +344,10 @@ class Profile2Peptide:
         out[mask] = all_peptides[:,::-1][mask[:,::-1]]
         all_peptides = out
         #print(all_peptides[:2])
-        
-        return all_peptides
+        if get_path_scores:
+            return all_peptides, path_scores
+        else:
+            return all_peptides
 
     def fix_same_bin(self, all_peptides):
         for aa in self.conflict_aas:
@@ -378,7 +395,9 @@ class Profile2Peptide:
                              b_mz_bins=None, b_probs=None, 
                              y_mz_input=None, b_mz_input=None,
                              num_peptides=5, current_seq=None,  
-                             fix_len=30, return_unique=False, idx=-1):
+                             get_path_scores=False,
+                             fix_len=30, return_unique=False, idx=-1,
+                            ):
         
         concat_y_mz_bins, concat_y_probs = self.concat_bins_probs(pepmass, y_mz_bins, y_probs, b_mz_bins, b_probs, 
                                                                   y_mz_input, b_mz_input)
@@ -391,13 +410,20 @@ class Profile2Peptide:
         if adjacency_matrix is None:
             #print(f'IDX {idx} Could not find adj matrix...')
             all_peptides = np.zeros((num_peptides,30)).astype(int) if current_seq is None else np.tile(current_seq, (num_peptides,1))
+            path_scores = np.zeros((num_peptides,))
         
         else:
-                
-            all_peptides_original = self.get_peptides_fromAdjMat(adjacency_matrix, reachable_y_mz_bins, num_peptides)
+            
+            
+            _out = self.get_peptides_fromAdjMat(adjacency_matrix, reachable_y_mz_bins, num_peptides, get_path_scores)
+            if get_path_scores:
+                all_peptides_original, path_scores = _out
+            else:
+                all_peptides_original = _out
 
-            all_peptides, _idx, _inv, _counts = np.unique(all_peptides_original, return_index=True, return_inverse=True, return_counts=True, axis=0)
-            all_peptides, _counts 
+            all_peptides, _idx, _inv, _counts = np.unique(all_peptides_original, 
+                                                          return_index=True, return_inverse=True, return_counts=True, axis=0)
+            #all_peptides, _counts 
 
             if (fix_len is not None) and ( fix_len-all_peptides.shape[1]>0 ):
                 #print('padding')
@@ -419,7 +445,19 @@ class Profile2Peptide:
                 all_peptides = all_peptides.astype(int)
 
             all_peptides = all_peptides[_inv] ## undo unique to recount unique counts after modifications
-
-
-        return np.unique(all_peptides, axis=0, return_counts=True) if return_unique else all_peptides               
+        
+        if return_unique:
+            all_peptides, _idx, _inv, _counts  = np.unique(all_peptides, axis=0, 
+                                                           return_index=True,
+                                                           return_inverse=True)
+            
+            if get_path_scores:
+                path_scores = path_scores[_idx]
+                return all_peptides, _counts, path_scores
+            return all_peptides, _counts 
+        
+        if get_path_scores:
+            return all_peptides, path_scores
+        else:
+            return all_peptides
         

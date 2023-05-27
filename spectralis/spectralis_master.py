@@ -42,7 +42,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from .lev_scoring.scorer import PSMLevScorer
+from .lev_scoring.scorer import PSMLevScorer, PSMLevScorerTrainer
 
 from .genetic_algorithm.ga_optimizer import GAOptimizer
 from .genetic_algorithm.input_from_csv import process_input
@@ -330,13 +330,49 @@ class Spectralis():
             return df
         
     
-    def rescoring_from_csv(self, input_path,
-                           peptide_col, precursor_z_col, prosit_ce, 
-                           exp_mzs_col, exp_ints_col, precursor_mz_col, 
-                           out_path=None, return_features=False
-                          ):
+    def rescoring_from_mgf(self, mgf_path, prosit_ce, return_features=False):
+        n_spectra = 0
+
+        charges = []
+        prec_mz = []
+        alpha_peptides = []
+
+        exp_mzs = []
+        exp_ints = []
+        scans = []
+        from pyteomics import mgf, auxiliary
         
-        df = pd.read_csv(input_path)
+        with mgf.MGF(mgf_path) as reader:
+            for spectrum in tqdm.tqdm(reader):
+                
+                charges.append(spectrum['params']['charge'][0])
+                prec_mz.append(spectrum['params']['pepmass'][0])
+                alpha_peptides.append(spectrum['params']['seq'])
+                
+                exp_mzs.append(spectrum['m/z array'])
+                exp_ints.append('intensity array')
+
+
+
+        precursor_z = np.array(charges)      
+        precursor_m = np.array(prec_mz)
+        
+        alpha_peptides = [p.replace('L', 'I') for f in alpha_peptides]
+        sequences = [U.map_peptide_to_numbers(p) for p in alpha_peptides]
+        padded_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
+
+        len_padded = max([len(el) for el in exp_mzs])
+        exp_mzs = np.array([np.pad(seq, (0,len_padded-len(seq)), 'constant', constant_values=(0,0)) for seq in exp_mzs])
+        exp_ints = np.array([np.pad(seq, (0,len_padded-len(seq)), 'constant', constant_values=(0,0)) for seq in exp_ints])
+
+        print(padded_seqs.shape, precursor_z.shape,exp_ints.shape, exp_mzs.shape, precursor_m.shape)
+        print(f'Getting scores for {len(padded_seqs)} PSMs')
+        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
+        return rescoring_out
+    
+    def _process_csv(self, csv_path, peptide_col, precursor_z_col, 
+                                      exp_mzs_col, exp_ints_col, precursor_mz_col, original_scores_col=None):
+        df = pd.read_csv(csv_path)
         
         df = df[df[peptide_col].notnull()]
         df = df[~ (df[peptide_col].str.contains('\+'))  ] ## assign these sequences lowest scores?
@@ -351,10 +387,8 @@ class Spectralis():
         df["peptide_int"] = df[peptide_col].apply(U.map_peptide_to_numbers)
         df["seq_len"] = df["peptide_int"].apply(len)
         
-        df_notHandled = df[~(df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
-        df_notHandled['Spectralis_score'] = np.NINF # lowest possible score
-        
-        df = df[(df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
+        df_notHandled = df[~((df.seq_len>1) & (df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE))]
+        df = df[(df.seq_len>1) & (df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
         df = df.reset_index()
         
         precursor_z = np.array(list(df[precursor_z_col]))      
@@ -369,9 +403,31 @@ class Spectralis():
         len_padded = max([len(el) for el in exp_mzs])
         exp_mzs = np.array([np.pad(seq, (0,len_padded-len(seq)), 'constant', constant_values=(0,0)) for seq in exp_mzs])
         exp_ints = np.array([np.pad(seq, (0,len_padded-len(seq)), 'constant', constant_values=(0,0)) for seq in exp_ints])
+        
+        if original_scores_col is not None:
+            original_scores = np.array(list(df[original_scores_col]))      
+            _out = padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, original_scores
+        else:
+            _out = padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m
+        return df, df_notHandled, _out
     
+    def rescoring_from_csv(self, input_path,
+                           peptide_col, precursor_z_col, prosit_ce, 
+                           exp_mzs_col, exp_ints_col, precursor_mz_col, 
+                           out_path=None, return_features=False, original_scores_col=None
+                          ):
+        
+        
+        df, df_notHandled, _out = self._process_csv(input_path, peptide_col, precursor_z_col, 
+                                      exp_mzs_col, exp_ints_col, precursor_mz_col, original_scores_col)
+        if original_scores_col is not None:
+            padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, original_scores = _out
+        else:
+            padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m = _out
+        
         print(f'Getting scores for {len(padded_seqs)} PSMs')
-        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
+        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m,
+                                       return_features=return_features, original_scores=original_scores)
         
         if return_features:
             scores = rescoring_out[0]
@@ -380,7 +436,8 @@ class Spectralis():
             scores = rescoring_out
         df[f'Spectralis_score'] = scores
         
-        #df = pd.concat([df, df_notHandled], axis=0).reset_index(drop=True)
+        df_notHandled['Spectralis_score'] = np.NINF # lowest possible score
+        df = pd.concat([df, df_notHandled], axis=0).reset_index(drop=True)
         df.drop(columns=['peptide_int', 'seq_len'], inplace=True)
         
         if out_path is not None:
@@ -403,7 +460,8 @@ class Spectralis():
         seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs = self.prepro_novor(novor_out_path)
         scores = self.rescoring(seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_features=False)
         
-    def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_features=False):
+    def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, 
+                  return_features=False, original_scores=None):
                 
         if self.scorer is None:
             self.scorer = self._init_scorer()  
@@ -423,7 +481,72 @@ class Spectralis():
                                                         )
         y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs = binreclass_out
 
-        return self.scorer.get_scores(exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_changes, return_features=return_features)
+        return self.scorer.get_scores(exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_changes, 
+                                      return_features=return_features, original_scores=original_scores)
+    
+    def train_scorer_from_csvs(self, csv_paths, peptide_col, precursor_z_col, 
+                                      exp_mzs_col, exp_ints_col, precursor_mz_col, target_col,
+                               prosit_ce = 0.32,
+                               original_score_col=None,
+                               model_type='xgboost', model_out_path='model.pkl', features_out_dir='.', csv_paths_eval=None):
+
+        trainer = PSMLevScorerTrainer( self.config['change_prob_thresholds'],
+                                       self.config['min_intensity'])
+        
+        csv_paths = [csv_paths] if isinstance(csv_paths, str) else csv_paths
+        csv_paths_eval = [] if csv_paths_eval is None else csv_paths_eval
+        csv_paths_eval = [csv_paths_eval] if isinstance(csv_paths_eval, str) else csv_paths_eval
+        
+        feature_paths = []
+        csv_dict = {'train':csv_paths, 'test':csv_paths_eval}
+        feature_paths = {'train':[], 'test':[]}
+        for k in csv_dict:
+            current_csv_paths = csv_dict[k]
+            for path in current_csv_paths:
+
+                feature_path = path.replace('/', '__').rsplit('.', 1)[0]#os.path.basename(path).rsplit( ".", 1 )[0] 
+                feature_path = f"{features_out_dir}/{feature_path}__features.hdf5"
+                feature_paths[k].append(feature_path)
+                if os.path.exists(feature_path):
+                    print(f'Feature path already exists \n\t<{feature_path}>')
+                    continue
+                print(f'Collecting features...\n\t<{feature_path}>')
+                df, df_notHandled, _out = self._process_csv(path,  peptide_col, precursor_z_col, 
+                                              exp_mzs_col, exp_ints_col, precursor_mz_col)
+                seqs, charges, exp_ints, exp_mzs, precursor_mzs = _out
+
+                prosit_out = self.get_prosit_output(seqs, charges, prosit_ce)
+                prosit_mzs, prosit_ints, prosit_anno =  prosit_out['fragmentmz'],prosit_out['intensity'], prosit_out['annotation']
+                
+                _idxminus = np.where(prosit_mzs[:,0]==-1)
+                print('PROSIT -1??', _idxminus)
+                print(seqs[_idxminus])
+                print(df.iloc[_idxminus])
+                
+                peptide_masses = np.array([U._compute_peptide_mass_from_seq(seqs[j]) for j in range(len(seqs)) ])
+
+                binreclass_out = self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_mzs,
+                                                                  prosit_ints=prosit_ints,
+                                                                  prosit_anno=prosit_anno, 
+                                                                  pepmass=peptide_masses,
+                                                                  exp_mzs=exp_mzs,
+                                                                  exp_int=exp_ints,
+                                                                  precursor_mz=precursor_mzs,
+                                                                )
+                y_probs, y_mz_probs, b_probs, b_mz_probs, y_changes, y_mz_inputs, b_mz_inputs = binreclass_out
+
+                targets = np.array(list(df[target_col]))
+                original_scores = np.array(list(df[original_score_col])) if original_score_col is not None else None
+                trainer.create_feature_files(exp_mzs, exp_ints, prosit_ints, prosit_mzs, 
+                                             y_changes, targets,
+                                             feature_path, original_scores)
+
+            print(f'Done creating feature files')
+        model = trainer.train_from_files(feature_paths['train'], model_type, model_out_path)
+        if len(feature_paths['test'])>0:
+            trainer.eval_from_files(feature_paths['test'], model)
+                 
+    
     
     def bin_reclassification_from_csv(self):
         return
