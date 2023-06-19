@@ -372,9 +372,15 @@ class Spectralis():
     
     def _process_csv(self, csv_path, peptide_col, precursor_z_col, 
                                       exp_mzs_col, exp_ints_col, precursor_mz_col, original_scores_col=None):
+        #print(csv_path)
         df = pd.read_csv(csv_path)
+        #print(df.columns)
+        #print(df.head())
+        original_len = len(df)
+        for _col in [peptide_col, precursor_z_col, exp_mzs_col, exp_ints_col, precursor_mz_col]:
+            df = df[df[_col].notnull()]
+        print(f"Processing input... removed {original_len-len(df)} PSMs due to NaNs (Original shape: {original_len})")
         
-        df = df[df[peptide_col].notnull()]
         df = df[~ (df[peptide_col].str.contains('\+'))  ] ## assign these sequences lowest scores?
         df[peptide_col] = (df[peptide_col].apply(lambda s: s.strip()
                                                             .replace('L', 'I')
@@ -424,6 +430,7 @@ class Spectralis():
             padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, original_scores = _out
         else:
             padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m = _out
+            original_scores = None
         
         print(f'Getting scores for {len(padded_seqs)} PSMs')
         rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m,
@@ -439,7 +446,10 @@ class Spectralis():
         df_notHandled['Spectralis_score'] = np.NINF # lowest possible score
         df = pd.concat([df, df_notHandled], axis=0).reset_index(drop=True)
         df.drop(columns=['peptide_int', 'seq_len'], inplace=True)
-        
+        if return_features:
+            features_extra = np.NINF + np.zeros((len(df_notHandled), features.shape[1]))
+            features = np.vstack([features, features_extra])
+
         if out_path is not None:
             df.to_csv(out_path)
                 

@@ -129,9 +129,23 @@ class BinReclassifier():
         all_b_probs = np.concatenate(all_b_probs)
         all_b_mz_probs = np.concatenate(all_b_mz_probs)
         all_y_changes = np.concatenate(all_y_changes)
-        all_y_mz_inputs = np.concatenate(all_y_mz_inputs)
-        all_b_mz_inputs = np.concatenate(all_b_mz_inputs)
         
+        try:
+            all_y_mz_inputs = np.concatenate(all_y_mz_inputs)
+        except ValueError:
+            _out = []
+            for l in all_y_mz_inputs:
+                _out += [row for row in l]
+            all_y_mz_inputs = np.array(_out)
+        
+        try:
+            all_b_mz_inputs = np.concatenate(all_b_mz_inputs)
+        except:
+            _out = []
+            for l in all_b_mz_inputs:
+                _out += [row for row in l]
+            all_b_mz_inputs = np.array(_out)
+             
         return all_y_probs, all_y_mz_probs, all_b_probs, all_b_mz_probs, all_y_changes, all_y_mz_inputs, all_b_mz_inputs     
     
     
