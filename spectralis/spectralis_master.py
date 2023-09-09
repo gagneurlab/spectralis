@@ -25,13 +25,10 @@ import torch
 from .denovo_utils import __constants__ as C
 from .denovo_utils import __utils__ as U
 
-from prosit_grpc.predictPROSIT import PROSITpredictor
-
 from .bin_reclassification.peptide2profile import Peptide2Profile
 from .bin_reclassification.profile2peptide import Profile2Peptide
 from .bin_reclassification.models import P2PNetPadded2dConv
 from .bin_reclassification.bin_reclassifier import BinReclassifier
-
 
 from .bin_reclassification.datasets import BinReclassifierDataset, BinReclassifierDataset_multiple
 from .bin_reclassification.models import WeightedFocalLoss
@@ -62,9 +59,6 @@ class Spectralis():
             
         self.verbose = self.config['verbose']
         
-        self.prosit_predictor = self._init_prosit_predictor()
-        print(f'[INFO] Initiated prosit predictor')
-        
         self.binreclass_model = self._init_binreclass_model()
         print(f'[INFO] Loaded bin reclass P2P-model')
         
@@ -93,13 +87,6 @@ class Spectralis():
                              self.config['change_prob_thresholds'],
                              self.config['min_intensity']
                             )
-    
-    def _init_prosit_predictor(self):
-        return PROSITpredictor(server=self.config['server'],
-                                path_to_ca_certificate = self.config['path_to_ca_certificate'],
-                                path_to_key_certificate = self.config['path_to_key_certificate'],
-                                path_to_certificate =  self.config['path_to_certificate']
-                              )
     
     def _init_binreclass_model(self,  load_from_checkpoint=True, num=0):
         #if torch.cuda.is_available():
@@ -219,7 +206,6 @@ class Spectralis():
             self.scorer = self._init_scorer()  
             print(f'[INFO] Initiated lev scorer')
         optimizer = GAOptimizer(bin_reclassifier=self.bin_reclassifier, 
-                                 prosit_predictor=self.prosit_predictor, 
                                  profile2peptider=self.profile2peptider,
                                  scorer=self.scorer,
 
@@ -281,10 +267,12 @@ class Spectralis():
         df = df[~ (df[peptide_col].str.contains('\+'))  ] ## assign these sequences lowest scores?
         df[peptide_col] = (df[peptide_col].apply(lambda s: s.strip()
                                                             .replace('L', 'I')
-                                                            .replace('(Cam)', 'C')
-                                                            .replace('OxM', 'Z')
-                                                            .replace('M(O)', 'Z')
-                                                            .replace('M(ox)', 'Z')
+                                                            .replace('(Cam)', '') ## Novor
+                                                            .replace('C', "C[UNIMOD:4]")
+                                                            .replace('OxM', "M[UNIMOD:35]")
+                                                            .replace('M(O)', "M[UNIMOD:35]")
+                                                            .replace('M(ox)', "M[UNIMOD:35]")
+                                                            .replace('Z', "M[UNIMOD:35]")
                                                 ) )
         
         df["peptide_int"] = df[peptide_col].apply(U.map_peptide_to_numbers)
@@ -297,19 +285,16 @@ class Spectralis():
         df = df.reset_index()
         
         
-        
+        alpha_seqs = list(df[peptide_col])
         sequences = np.array([np.asarray(x) for x in df["peptide_int"]]).flatten()
         padded_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
         
         
 
         
-        
-        
-        
         ## get scores
         print(f'Getting scores for {len(padded_seqs)} PSMs')
-        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
+        rescoring_out = self.rescoring(alpha_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
         
         if return_features:
             scores = rescoring_out[0]
@@ -357,8 +342,15 @@ class Spectralis():
         precursor_z = np.array(charges)      
         precursor_m = np.array(prec_mz)
         
-        alpha_peptides = [p.replace('L', 'I') for f in alpha_peptides]
-        sequences = [U.map_peptide_to_numbers(p) for p in alpha_peptides]
+        alpha_seqs = ([p.replace('L', 'I')
+                               .replace('C', "C[UNIMOD:4]")
+                                   .replace('(Cam)', '') # Novor
+                                .replace('OxM', "M[UNIMOD:35]")
+                                .replace('M(O)', "M[UNIMOD:35]")
+                                .replace('M(ox)', "M[UNIMOD:35]")
+                                .replace('Z', "M[UNIMOD:35]") for f in alpha_peptides]
+                            )
+        sequences = [U.map_peptide_to_numbers(p) for p in alpha_seqs]
         padded_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
 
         len_padded = max([len(el) for el in exp_mzs])
@@ -367,7 +359,7 @@ class Spectralis():
 
         print(padded_seqs.shape, precursor_z.shape,exp_ints.shape, exp_mzs.shape, precursor_m.shape)
         print(f'Getting scores for {len(padded_seqs)} PSMs')
-        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
+        rescoring_out = self.rescoring(alpha_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m, return_features=return_features)
         return rescoring_out
     
     def _process_csv(self, csv_path, peptide_col, precursor_z_col, 
@@ -381,14 +373,17 @@ class Spectralis():
             df = df[df[_col].notnull()]
         print(f"Processing input... removed {original_len-len(df)} PSMs due to NaNs (Original shape: {original_len})")
         
-        df = df[~ (df[peptide_col].str.contains('\+'))  ] ## assign these sequences lowest scores?
+        #df = df[~ (df[peptide_col].str.contains('\+'))  ] ## assign these sequences lowest scores?
         df[peptide_col] = (df[peptide_col].apply(lambda s: s.strip()
                                                             .replace('L', 'I')
-                                                            .replace('(Cam)', 'C')
-                                                            .replace('OxM', 'Z')
-                                                            .replace('M(O)', 'Z')
-                                                            .replace('M(ox)', 'Z')
+                                                            .replace('C', "C[UNIMOD:4]")#
+                                                            .replace('(Cam)', '') ## Novor
+                                                            .replace('OxM', "M[UNIMOD:35]")
+                                                            .replace('M(O)', "M[UNIMOD:35]")
+                                                            .replace('M(ox)', "M[UNIMOD:35]")
+                                                            .replace('Z', "M[UNIMOD:35]")
                                                 ) )
+        
         
         df["peptide_int"] = df[peptide_col].apply(U.map_peptide_to_numbers)
         df["seq_len"] = df["peptide_int"].apply(len)
@@ -397,6 +392,7 @@ class Spectralis():
         df = df[(df.seq_len>1) & (df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE)]
         df = df.reset_index()
         
+        alpha_seqs = list(df[peptide_col])
         precursor_z = np.array(list(df[precursor_z_col]))      
         precursor_m = np.array([np.asarray(x) for x in df[precursor_mz_col]])
 
@@ -412,9 +408,9 @@ class Spectralis():
         
         if original_scores_col is not None:
             original_scores = np.array(list(df[original_scores_col]))      
-            _out = padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, original_scores
+            _out = padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, alpha_seqs, original_scores
         else:
-            _out = padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m
+            _out = padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, alpha_seqs
         return df, df_notHandled, _out
     
     def rescoring_from_csv(self, input_path,
@@ -427,13 +423,13 @@ class Spectralis():
         df, df_notHandled, _out = self._process_csv(input_path, peptide_col, precursor_z_col, 
                                       exp_mzs_col, exp_ints_col, precursor_mz_col, original_scores_col)
         if original_scores_col is not None:
-            padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, original_scores = _out
+            padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, alpha_seqs, original_scores = _out
         else:
-            padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m = _out
+            padded_seqs, precursor_z, exp_ints, exp_mzs, precursor_m, alpha_seqs = _out
             original_scores = None
         
         print(f'Getting scores for {len(padded_seqs)} PSMs')
-        rescoring_out = self.rescoring(padded_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m,
+        rescoring_out = self.rescoring(alpha_seqs, precursor_z, prosit_ce, exp_ints, exp_mzs, precursor_m,
                                        return_features=return_features, original_scores=original_scores)
         
         if return_features:
@@ -458,32 +454,25 @@ class Spectralis():
         else:
             return df
         
-    def get_prosit_output(self, seqs, charges, prosit_ce):
-        return self.prosit_predictor.predict(sequences=seqs, 
-                                      charges=[int(c) for c in charges], 
-                                      collision_energies=[prosit_ce]*len(seqs), 
-                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
-        
-    
     def rescoring_novor(novor_out_path):
         ##prepro
-        seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs = self.prepro_novor(novor_out_path)
-        scores = self.rescoring(seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_features=False)
-        
-    def rescoring(self, seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, 
+        #seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, alpha_seqs = self.prepro_novor(novor_out_path)
+        #scores = self.rescoring(alpha_seqs, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, return_features=False)
+        return 
+    
+    def rescoring(self, alpha_peps, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, 
                   return_features=False, original_scores=None):
                 
         if self.scorer is None:
             self.scorer = self._init_scorer()  
             print(f'[INFO] Initiated lev scorer')
             
-        prosit_out = self.get_prosit_output(seqs, charges, prosit_ce)
-        prosit_mzs, prosit_ints, prosit_anno =  prosit_out['fragmentmz'],prosit_out['intensity'], prosit_out['annotation']
+        prosit_out = U.get_prosit_output(alpha_peps, charges, prosit_ce)
+        prosit_mzs, prosit_ints =  prosit_out['mz'],prosit_out['intensities']
         
-        peptide_masses = np.array([U._compute_peptide_mass_from_seq(seqs[j]) for j in range(len(seqs)) ])
+        peptide_masses = np.array([U._compute_peptide_mass_from_seq(alpha_peps[j]) for j in range(len(alpha_peps)) ])
         binreclass_out = self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_mzs,
                                                           prosit_ints=prosit_ints,
-                                                          prosit_anno=prosit_anno, 
                                                           pepmass=peptide_masses,
                                                           exp_mzs=exp_mzs,
                                                           exp_int=exp_ints,
@@ -523,10 +512,10 @@ class Spectralis():
                 print(f'Collecting features...\n\t<{feature_path}>')
                 df, df_notHandled, _out = self._process_csv(path,  peptide_col, precursor_z_col, 
                                               exp_mzs_col, exp_ints_col, precursor_mz_col)
-                seqs, charges, exp_ints, exp_mzs, precursor_mzs = _out
+                seqs, charges, exp_ints, exp_mzs, precursor_mzs, alpha_seqs = _out
 
-                prosit_out = self.get_prosit_output(seqs, charges, prosit_ce)
-                prosit_mzs, prosit_ints, prosit_anno =  prosit_out['fragmentmz'],prosit_out['intensity'], prosit_out['annotation']
+                prosit_out = U.get_prosit_output(seqs, charges, prosit_ce)
+                prosit_mzs, prosit_ints =  prosit_out['mz'],prosit_out['intensities']
                 
                 _idxminus = np.where(prosit_mzs[:,0]==-1)
                 print('PROSIT -1??', _idxminus)
@@ -537,7 +526,6 @@ class Spectralis():
 
                 binreclass_out = self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_mzs,
                                                                   prosit_ints=prosit_ints,
-                                                                  prosit_anno=prosit_anno, 
                                                                   pepmass=peptide_masses,
                                                                   exp_mzs=exp_mzs,
                                                                   exp_int=exp_ints,
@@ -610,13 +598,13 @@ class Spectralis():
     
     def bin_reclassification(self, peptides_int, charges, prosit_ce, exp_ints, exp_mzs, precursor_mzs, peptides_true_int=None, return_changes=True):
         
-        prosit_out = self.get_prosit_output(peptides_int, charges, prosit_ce)
+        prosit_out = U.get_prosit_output(peptides_int, charges, prosit_ce)
         
         peptide_masses = np.array([U._compute_peptide_mass_from_seq(peptides_int[j]) for j in range(len(peptides_int)) ])
         
         if peptides_true_int is not None:
             print('Bin reclassification with targets')
-            prosit_out_true = self.get_prosit_output(peptides_true_int, charges, prosit_ce)
+            prosit_out_true = U.get_prosit_output(peptides_true_int, charges, prosit_ce)
             peptide_masses_true = np.array([U._compute_peptide_mass_from_seq(peptides_true_int[j]) for j in range(len(peptides_true_int)) ])
             
             _outputs, _inputs, _targets = self.bin_reclassifier.get_binreclass_preds_wTargets(prosit_out, peptide_masses,
@@ -634,9 +622,8 @@ class Spectralis():
             
         else:
             print('Bin reclassification')
-            return self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_out['fragmentmz'],
-                                                          prosit_ints=prosit_out['intensity'],
-                                                          prosit_anno=prosit_out['annotation'], 
+            return self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_out['mz'],
+                                                          prosit_ints=prosit_out['intensities'],
                                                           pepmass=peptide_masses,
                                                           exp_mzs=exp_mzs,
                                                           exp_int=exp_ints,
@@ -665,10 +652,10 @@ class Spectralis():
                 
                 
                 peptide_masses = np.array([U._compute_peptide_mass_from_seq(peptides_int[j]) for j in range(len(peptides_int)) ])
-                prosit_output = self.get_prosit_output(peptides_int, charges, prosit_ce)
+                prosit_output = U.get_prosit_output(peptides_int, charges, prosit_ce)
                 
                 peptide_masses_true = np.array([U._compute_peptide_mass_from_seq(peptides_true_int[j]) for j in range(len(peptides_true_int)) ])
-                prosit_output_true = self.get_prosit_output(peptides_true_int, charges, prosit_ce)
+                prosit_output_true = U.get_prosit_output(peptides_true_int, charges, prosit_ce)
                 
                 current_dataset = BinReclassifierDataset(self.peptide2profiler, prosit_output, peptide_masses,
                                                                exp_mzs, exp_ints, precursor_mzs,
@@ -772,16 +759,16 @@ class Spectralis():
                     
             model.train()
             print("\n---")      
+
+
+
+
+
+
+
+
+
         
-
-
-
-
 
     
 
-
-        
-            
-    
-        

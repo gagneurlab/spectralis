@@ -10,6 +10,83 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from sklearn.preprocessing import normalize
 
+import tqdm
+import tritonclient.grpc as grpcclient
+import time
+
+def get_prosit_output(seqs, charges, prosit_ce, 
+                     server_url = 'koina.proteomicsdb.org:443',
+                    model_name = 'Prosit_2019_intensity',
+                    batch_size = 1000):
+    
+    is_real = np.isreal(seqs)
+    if not isinstance(is_real, bool):
+        if is_real.all():
+            print('Convert peptide_int to alpha for prosit preds')
+            seqs = [map_numbers_to_peptide(s) for s in seqs]
+            #print(seqs)
+            
+    if prosit_ce<=1.:
+        prosit_ce = int(prosit_ce*100)
+    num_seqs = len(seqs)
+    
+    ## check if seqs are in integer representation... convert them to alpha
+    print(len(seqs), len(charges), prosit_ce, num_seqs)
+    inputs = { 
+                'peptide_sequences': np.array(seqs, dtype=np.dtype("O")).reshape([num_seqs,1]),
+                'precursor_charges': np.array(charges, dtype=np.dtype("int32")).reshape([num_seqs,1]),
+                'collision_energies': np.array([prosit_ce]*num_seqs, dtype=np.dtype("float32")).reshape([num_seqs,1]),
+            }
+    
+    for key in inputs:
+        print(key, inputs[key].shape, inputs[key][:3])
+        
+    nptype_convert = {
+        np.dtype('float32'): 'FP32',
+        np.dtype('O'): 'BYTES',
+        np.dtype('int16'): 'INT16',
+        np.dtype('int32'): 'INT32',
+        np.dtype('int64'): 'INT64',
+    }
+
+    
+
+    outputs = [ 'intensities',  'mz',  'annotation' ]
+    triton_client = grpcclient.InferenceServerClient(url=server_url, ssl=True)
+
+    koina_outputs = []
+    for name in outputs:
+        koina_outputs.append(grpcclient.InferRequestedOutput(name))
+
+    predictions = {name: [] for name in outputs}
+    len_inputs = list(inputs.values())[0].shape[0]
+    
+    for i in tqdm.tqdm(range(0, len_inputs, batch_size)):
+        koina_inputs = []
+        for iname, iarr in inputs.items():
+            islice = iarr[i:i+batch_size]
+            koina_inputs.append(
+                grpcclient.InferInput(iname, islice.shape, nptype_convert[iarr.dtype])
+            )
+            koina_inputs[-1].set_data_from_numpy(islice)
+
+        prediction = triton_client.infer(model_name, inputs=koina_inputs, outputs=koina_outputs)
+
+        for name in outputs:
+            predictions[name].append(prediction.as_numpy(name))
+
+         
+    print(predictions.keys())
+    for key, value in predictions.items():
+        predictions[key] = np.vstack(value)
+        #print(key, predictions[key].shape)
+        #print(predictions[key])
+        
+    min_prosit = 0.0001
+    predictions['intensities'][(predictions['intensities']>-1) & (predictions['intensities']<min_prosit)] = 0
+    
+    return predictions
+
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
@@ -24,10 +101,11 @@ def _load_pickle_model(pickle_path):
 
 def _compute_peptide_mass_from_seq(peptide_seq):
         if isinstance(peptide_seq, str):
-            peptide_seq = peptide_seq.replace('M(ox)', 'Z').replace('M(O)', 'Z').replace('OxM', 'Z')
-            return sum([C.AMINO_ACIDS_MASS[i] for i in peptide_seq]) + C.MASSES['H2O'] 
-        else:
-            return sum([C.VEC_MZ[i] for i in peptide_seq]) + C.MASSES['H2O']
+            peptide_seq = map_peptide_to_numbers(peptide_seq)
+            #peptide_seq = peptide_seq.replace('M(ox)', 'Z').replace('M(O)', 'Z').replace('OxM', 'Z')
+            #return sum([C.AMINO_ACIDS_MASS[i] for i in peptide_seq]) + C.MASSES['H2O'] 
+            
+        return sum([C.VEC_MZ[i] for i in peptide_seq]) + C.MASSES['H2O'] if peptide_seq is not None else None 
 
 def _compute_peptide_mass(peptide_int):
     return sum([C.VEC_MZ[i] for i in peptide_int]) + C.MASSES['H2O']
@@ -105,30 +183,22 @@ def map_peptide_to_numbers(seq):
     seq = seq.replace(" ", "")
     l = len(seq)
     while i<l:
-        # Special Cases: CaC, OxM, M(ox), M(O), PhS, PhT, PhY, (Cam)
-        if seq[i:i+3] == "CaC": 
-            nums.append(C.ALPHABET["CaC"])
-            i += 3
-        elif seq[i:i+3] == "OxM": 
-            nums.append(C.ALPHABET["OxM"])
-            i += 3
-        elif seq[i:i+4] == "M(O)": 
-            nums.append(C.ALPHABET["M(O)"])
-            i += 4
-        elif seq[i:i+5] == "M(ox)": 
-            nums.append(C.ALPHABET["M(ox)"]) # OxM --> Z
-            i += 5
-        elif seq[i:i+5] == "(Cam)": 
-            nums.append(C.ALPHABET["(Cam)"])
-            i += 5
-        # Single char is in ALPHABET
-        elif seq[i] in C.ALPHABET:
-            nums.append(C.ALPHABET[seq[i]])
-            i +=1
-        else:
-            print("Char {} not found in sequence {}".format(seq[i], seq))
-            nums.append(-1)
-            i += 1
+        # Special Cases: C[UNIMOD:4], M[UNIMOD:35] 
+        mods = C.MODIFICATIONS
+        at_mod = False
+        for mod in mods:
+            if seq[i:i+len(mod)] == mod:
+                nums.append(C.ALPHABET[mod])
+                i += len(mod)
+                at_mod = True
+                
+        if not at_mod:
+            if seq[i] in C.ALPHABET:
+                nums.append(C.ALPHABET[seq[i]])
+                i +=1
+            else:
+                print("Error in parsing {} at pos {} in sequence {}".format(seq[i], i, seq))
+                return None
     return nums
 
 def flatten_list(l_2d):

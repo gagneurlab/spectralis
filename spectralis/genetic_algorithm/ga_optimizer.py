@@ -26,7 +26,6 @@ from .seq_initializer import SequenceGenerator
 class GAOptimizer():
     
     def __init__(self, bin_reclassifier, 
-                 prosit_predictor, 
                  profile2peptider,
                  scorer,
                  
@@ -50,7 +49,6 @@ class GAOptimizer():
         
         self.scorer = scorer
         self.bin_reclassifier = bin_reclassifier      
-        self.prosit_predictor = prosit_predictor
         self._profile2peptide = profile2peptider
         
         self.TRACK_LINEAGE = False
@@ -156,33 +154,19 @@ class GAOptimizer():
                 self.scores_cache[tuple(cache_ids[idx])] = new_scores[i]
             print(f'\t\t\tUpdated cache size: {len(self.scores_cache)}')
         return scores
-
-        
-    def get_prosit_output(self, seqs, charges, ces=None):
-        ces = np.repeat(self.PROSIT_CE, len(seqs)) if ces is None else ces   
-        MAX_TRIES = 5
-        for i in range(MAX_TRIES):
-            try:
-                prosit_out = self.prosit_predictor.predict(sequences=seqs, 
-                                      charges=[int(c) for c in charges], collision_energies=ces, 
-                                      models=["Prosit_2019_intensity"])['Prosit_2019_intensity']
-                
-                return prosit_out['fragmentmz'],prosit_out['intensity'], prosit_out['annotation']
-            except _Rendezvous as e:
-                time.sleep(5) 
-    
     
     def get_initial_scores(self, initial_seqs, precursor_z, precursor_m, scans, 
                            exp_mzs, exp_intensities, return_prosit_p2p=False):
         
-        prosit_mzs, prosit_ints, prosit_anno = self.get_prosit_output(initial_seqs, precursor_z, [self.PROSIT_CE]*len(initial_seqs)  )
+        prosit_output = U.get_prosit_output(initial_seqs, precursor_z, self.PROSIT_CE )
+        prosit_mzs, prosit_ints = prosit_out['mz'],prosit_out['intensities']
+        
         alpha_seqs = [U.map_numbers_to_peptide(p) for p in initial_seqs]
         cache_ids = np.array([(alpha_seqs[i], scans[i]) for i in range(len(alpha_seqs))])     
 
         masses_sequences = np.array([U._compute_peptide_mass_from_seq(initial_seqs[j]) for j in range(len(initial_seqs)) ])
         _, _, _, _, y_change_bin_probs, _, _, = self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_mzs, 
                                                                           prosit_ints=prosit_ints,
-                                                                          prosit_anno=prosit_anno,
                                                                           pepmass=masses_sequences,
                                                                           exp_mzs=exp_mzs,
                                                                           exp_int=exp_intensities,
@@ -442,7 +426,9 @@ class GAOptimizer():
             
             ## Prosit preds
             start_prosit = timer()
-            prosit_mzs, prosit_ints, prosit_anno = self.get_prosit_output(all_populations, all_charges )
+            prosit_out = U.get_prosit_output(all_populations, all_charges, self.PROSIT_CE )
+            prosit_mzs, prosit_ints = prosit_out['mz'],prosit_out['intensities']
+        
             print(f'--- Elapsed time for collecting prosit preds: {timedelta(seconds=timer()-start_prosit)}')
             #for temp_var in [prosit_mzs, prosit_ints]:
             #    print('=== ', self.retrieve_name(temp_var), temp_var.shape)
@@ -451,7 +437,6 @@ class GAOptimizer():
             start_p2p = timer()
             binreclass_out = self.bin_reclassifier.get_binreclass_preds(prosit_mzs=prosit_mzs,
                                                           prosit_ints=prosit_ints,
-                                                          prosit_anno=prosit_anno, 
                                                           pepmass=all_pep_masses,
                                                           exp_mzs=all_exp_mzs,
                                                           exp_int=all_exp_ints,

@@ -1,3 +1,4 @@
+import re
 import numpy as np
 import math
 import sys
@@ -13,7 +14,6 @@ from ..denovo_utils import __constants__ as C
 
 import sys
 import os
-#sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/bin_reclassification'))
 from .ms2_binning import get_binning, get_bins_assigments
 
 class Peptide2Profile:
@@ -63,23 +63,22 @@ class Peptide2Profile:
         
     @staticmethod
     def _subset_prosit(prosit_output, ion_type, charge):
-        mzs = prosit_output['fragmentmz'].copy()
-        intensities = prosit_output['intensity'].copy()
-        anno = prosit_output['annotation']
+        mzs = prosit_output['mz'].copy()
+        intensities = prosit_output['intensities'].copy()
         
-        idx = (anno['charge']==charge) & (anno['type']==ion_type)
-        mzs[~idx] = 0 # set to zero what we do not need
-        intensities[~idx] = 0
+        idx = np.array([bool(re.match(f"{ion_type}[0-9]+\+{charge}", s)) for s in C.PROSIT_ANNO])
+        mzs[:, ~idx] = 0 #mzs[~idx] = 0 # set to zero what we do not need
+        intensities[:, ~idx] = 0
         return mzs, intensities
     
     def _get_peptide2binned(self, prosit_output):
         ## Collect binned intensities for every seq and every considered fragment_type
-        binned_intensities = np.zeros((len(prosit_output['fragmentmz']), #len(peptide_seqs), 
+        binned_intensities = np.zeros((len(prosit_output['mz']), #len(peptide_seqs), 
                                        math.ceil(self.max_mz_bin/self.bin_resolution), 
                                       ), dtype=np.float16)
         
-        mzs = prosit_output['fragmentmz']
-        intensities = prosit_output['intensity']
+        mzs = prosit_output['mz']
+        intensities = prosit_output['intensities']
 
         ## Handle every seq
         for i in tqdm.tqdm(range(mzs.shape[0]), disable=True):
@@ -101,7 +100,7 @@ class Peptide2Profile:
         n_channels = len(self.considered_charges)*len(self.considered_ion_types)
         #if self.add_fragment_position==True:
         #    n_channels += 2
-        profiles = np.zeros((len(prosit_output['fragmentmz']), #len(peptide_seqs),
+        profiles = np.zeros((len(prosit_output['mz']), #len(peptide_seqs),
                              n_channels,
                              n_bins
                             ), dtype=np.int8 )
@@ -207,7 +206,6 @@ class Peptide2Profile:
     
     def _get_peptideWExp2binned(self,prosit_output, exp_mzs, exp_int, pepmass, precursor_mz ):
         
-        print('APPLYING SQRT TRANSFORM?', self.sqrt_transform)
         profiles = self._get_peptide2profile(prosit_output, pepmass=pepmass)
         
         # Add precursor range

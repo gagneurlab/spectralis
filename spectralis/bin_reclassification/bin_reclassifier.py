@@ -38,9 +38,9 @@ class BinReclassifier():
         
         
     
-    def get_binreclass_dataset(self, prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz):
+    def get_binreclass_dataset(self, prosit_mzs, prosit_ints, pepmass, exp_mzs, exp_int, precursor_mz):
         
-        prosit_output = {'fragmentmz': prosit_mzs, 'intensity': prosit_ints, 'annotation':prosit_anno}
+        prosit_output = {'mz': prosit_mzs, 'intensities': prosit_ints}
         return BinReclassifierDataset_eval(p2p=self.peptide2profiler, 
                                              prosit_output=prosit_output, 
                                              pepmass=pepmass,
@@ -88,10 +88,10 @@ class BinReclassifier():
 
         
     
-    def get_binreclass_preds(self, prosit_mzs, prosit_ints, prosit_anno, 
+    def get_binreclass_preds(self, prosit_mzs, prosit_ints, 
                               pepmass, exp_mzs, exp_int, precursor_mz, return_mz_changes=False):
         
-        _dataset = self.get_binreclass_dataset(prosit_mzs, prosit_ints, prosit_anno, pepmass, exp_mzs, exp_int, precursor_mz)
+        _dataset = self.get_binreclass_dataset(prosit_mzs, prosit_ints, pepmass, exp_mzs, exp_int, precursor_mz)
         dataloader = DataLoader(dataset=_dataset, batch_size=self.batch_size, shuffle=False, num_workers=8)
         
         all_y_probs, all_y_mz_probs, all_b_probs, all_b_mz_probs, all_y_changes, all_y_mz_inputs, all_b_mz_inputs = [],[],[],[],[],[],[]
