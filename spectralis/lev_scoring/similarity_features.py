@@ -1,11 +1,16 @@
+import logging
+logging.captureWarnings(True)
+
 import numpy as np
+from sklearn.metrics import mean_squared_error
+from joblib import Parallel, delayed
+
 import scipy.sparse
 import scipy.sparse.linalg
 import scipy.stats
 from scipy import spatial
-from numpy import mean, absolute, std
-from sklearn.metrics import mean_squared_error
-from joblib import Parallel, delayed
+
+
 
 
 # small positive intensity to distinguish invalid ion (=0) from missing peak (=EPSILON)
@@ -220,9 +225,9 @@ def _get_abs_diff(observed_intensities, predicted_intensities, charge, normalize
                 continue
                 #return np.stack(np.asarray([0, 0, 0,0,0,0,0,0,0 ]))
             
-            abs_res = absolute(obs - mean(pred))
-            means.append(mean(abs_res))
-            stds.append(std(abs_res))
+            abs_res = np.absolute(obs - np.mean(pred))
+            means.append(np.mean(abs_res))
+            stds.append(np.std(abs_res))
             q3,q2,q1 = np.quantile(a = abs_res, q= [.75, .5,.25])
             Q3.append(q3)
             Q2.append(q2)

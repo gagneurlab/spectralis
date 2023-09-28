@@ -8,8 +8,6 @@ import networkx as nx
 from scipy.sparse import csc_matrix, csr_matrix
 from collections import OrderedDict as ODict
 
-from prosit_grpc.predictPROSIT import PROSITpredictor
-
 from ..denovo_utils import __constants__ as C
 
 import sys

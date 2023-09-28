@@ -6,8 +6,6 @@ import numpy as np
 import pickle
 import itertools
 import math
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 from sklearn.preprocessing import normalize
 
 import tqdm
@@ -22,7 +20,7 @@ def get_prosit_output(seqs, charges, prosit_ce,
     is_real = np.isreal(seqs)
     if not isinstance(is_real, bool):
         if is_real.all():
-            print('Convert peptide_int to alpha for prosit preds')
+            print('[Prosit preds] Convert peptide_int to alpha')
             seqs = [map_numbers_to_peptide(s) for s in seqs]
             #print(seqs)
             
@@ -31,15 +29,15 @@ def get_prosit_output(seqs, charges, prosit_ce,
     num_seqs = len(seqs)
     
     ## check if seqs are in integer representation... convert them to alpha
-    print(len(seqs), len(charges), prosit_ce, num_seqs)
+    #print(len(seqs), len(charges), prosit_ce, num_seqs)
     inputs = { 
                 'peptide_sequences': np.array(seqs, dtype=np.dtype("O")).reshape([num_seqs,1]),
                 'precursor_charges': np.array(charges, dtype=np.dtype("int32")).reshape([num_seqs,1]),
                 'collision_energies': np.array([prosit_ce]*num_seqs, dtype=np.dtype("float32")).reshape([num_seqs,1]),
             }
     
-    for key in inputs:
-        print(key, inputs[key].shape, inputs[key][:3])
+    #for key in inputs:
+    #    print(key, inputs[key].shape, inputs[key][:3])
         
     nptype_convert = {
         np.dtype('float32'): 'FP32',
@@ -76,7 +74,7 @@ def get_prosit_output(seqs, charges, prosit_ce,
             predictions[name].append(prediction.as_numpy(name))
 
          
-    print(predictions.keys())
+    #print(predictions.keys())
     for key, value in predictions.items():
         predictions[key] = np.vstack(value)
         #print(key, predictions[key].shape)
@@ -178,27 +176,31 @@ def map_peptide_to_numbers(seq):
     """
     Map string of peptide sequence to numeric list based on dictionary ALPHABET
     """
-    nums = []
-    i = 0        
-    seq = seq.replace(" ", "")
-    l = len(seq)
-    while i<l:
-        # Special Cases: C[UNIMOD:4], M[UNIMOD:35] 
-        mods = C.MODIFICATIONS
-        at_mod = False
-        for mod in mods:
-            if seq[i:i+len(mod)] == mod:
-                nums.append(C.ALPHABET[mod])
-                i += len(mod)
-                at_mod = True
-                
-        if not at_mod:
-            if seq[i] in C.ALPHABET:
+    try:
+        nums = []
+        i = 0        
+        seq = seq.replace(" ", "")
+        l = len(seq)
+        while i<l:
+            # Special Cases: C[UNIMOD:4], M[UNIMOD:35] 
+            mods = C.MODIFICATIONS
+            at_mod = False
+            for mod in mods:
+                if seq[i:i+len(mod)] == mod:
+                    nums.append(C.ALPHABET[mod])
+                    i += len(mod)
+                    at_mod = True
+
+            if not at_mod:
+                #if seq[i] in C.ALPHABET:
                 nums.append(C.ALPHABET[seq[i]])
                 i +=1
-            else:
-                print("Error in parsing {} at pos {} in sequence {}".format(seq[i], i, seq))
-                return None
+                #else:
+                #    print("Error in parsing {} at pos {} in sequence {}".format(seq[i], i, seq))
+                #    return None
+    except:
+        print("Error in parsing {} at pos {} in sequence {}".format(seq[i], i, seq)) 
+        return
     return nums
 
 def flatten_list(l_2d):

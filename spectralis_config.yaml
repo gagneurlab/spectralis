@@ -1,10 +1,8 @@
 ### PATHS
 binreclass_model_path: '/s/project/denovo-prosit/JohannesHingerl/models/focal_loss_wang_jit_model.pt'
-#scorer_path: '/s/project/denovo-prosit//DanielaAndrade/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_REL_PERF__rf_model_NTREES86_MINSPLIT4_MINLEAF112_MAXFEAT36_MAXDEPTH175.pkl'
-scorer_path: '/s/project/denovo-prosit/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_MAX_REC__rf_model_NTREES182_MINSPLIT114_MINLEAF77_MAXFEAT88_MAXDEPTH420.pkl'
+scorer_path: '/s/project/denovo-prosit/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_REL_PERF__rf_model_NTREES86_MINSPLIT4_MINLEAF112_MAXFEAT36_MAXDEPTH175.pkl'
+#scorer_path: '/s/project/denovo-prosit/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_MAX_REC__rf_model_NTREES182_MINSPLIT114_MINLEAF77_MAXFEAT88_MAXDEPTH420.pkl'
 #scorer_path: '/s/project/denovo-prosit/DanielaAndrade/data/PXD010154/30healthy_human_tissues_fullproteome_Ensembl_txt/xgboost_training/trained_models/BEST_MAX_REC__xgboost_model_NTREES410_MAXDEPTH10_COLSMPL0.17345241747512607_SUB0.9297378949400271.pkl'
-
-aa_mass_lookup_path: '/s/project/denovo-prosit/DanielaAndrade/1_datasets/Hela_internal/lookup/mass_sorted_v5.csv'
 
 
 ### BIN RECLASSIFICATION
@@ -43,15 +41,18 @@ max_delta_ppm: 0.00002
 min_intensity: 0.02
 
 ### GA only
-POPULATION_SIZE: 1024
+POPULATION_SIZE: 64
 ELITE_RATIO: 0.3
-NUM_GEN: 5
+NUM_GEN: 2
 TEMPERATURE: 10
 MIN_SCORE: -2
 MAX_SCORE: -1
 cache_scores: True
 
+### all
 num_cores: -1
 write_pop_to_file: False
+prosit_ce: 0.32
 
 verbose: False
+interpret_c_as_fix: True

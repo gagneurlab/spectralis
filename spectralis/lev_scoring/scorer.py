@@ -5,6 +5,10 @@ __author__ = "Daniela Andrade Salazar"
 __email__ = "daniela.andrade@tum.de"
 
 """
+import logging
+logging.captureWarnings(True)
+
+
 import numpy as np
 import pickle
 
@@ -39,7 +43,8 @@ class BasePSMLevScorer():
         # Assume exp int und exp mzs are preprocessed with ms2_comparison._process_exp_ms2
         prosit_mzs, prosit_ints = ms2_comparison._process_theo_ms2(prosit_mzs, prosit_ints, 
                                                                    min_intensity=self.min_intensity)
-        features = ms2_comparison.compute_all_features(prosit_mzs, prosit_ints, exp_mzs, exp_ints)
+        with np.errstate(divide='ignore'):  
+            features = ms2_comparison.compute_all_features(prosit_mzs, prosit_ints, exp_mzs, exp_ints)
         features = np.append(self._get_p2p_features(y_change_bin_probs), features, axis=1)  
         if original_scores is not None:
             features = np.hstack([features, original_scores.reshape(-1,1)])
