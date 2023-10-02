@@ -20,7 +20,7 @@ setup(
                              'editdistance==0.5.3',
                              'h5py',
                              'fastparquet',
-                             'grpc', 
+                             'grpcio', 
                              'networkx',
                              'numpy ',
                              'pandas==1.3.5',
