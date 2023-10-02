@@ -34,7 +34,7 @@ pip install .
 ## Getting started
 
 Trained models and example files can be found in the following Zenodo repository:
-FIXME
+[zenodo.8393846](https://zenodo.org/record/8393846).
 
 ### Configuration
 
