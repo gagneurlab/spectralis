@@ -4,10 +4,12 @@ import numpy as np
 N_THEO_PEAKS = 174
 MAX_PPM_DIFF = 20
 
-IDX_B = np.array([i for i in range(N_THEO_PEAKS) if i%6>2]) ## Check this
+IDX_B = np.array([i for i in range(N_THEO_PEAKS) if i%6>2]) 
 IDX_Y = np.array([i for i in range(N_THEO_PEAKS) if i%6<=2])
 
 def get_counting_features(all_common_peaks):
+    ### This function computes all counting features ###
+    
     n_possible_peaks =  np.sum( (all_common_peaks[:,:, 0]>0), axis=1) # Prosit_mz>0
 
     ##### prosit_int>0

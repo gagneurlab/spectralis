@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import sys
 import os
-#sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/lev_scoring'))
+
 from . import similarity_features as sim
 from . import counting_features as coun
 

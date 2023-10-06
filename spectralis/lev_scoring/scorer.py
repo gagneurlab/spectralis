@@ -12,10 +12,8 @@ logging.captureWarnings(True)
 import numpy as np
 import pickle
 
-
 import sys
 import os
-#sys.path.insert(0, os.path.abspath('/data/nasif12/home_if12/salazar/Spectralis/lev_scoring'))
 from . import ms2_comparison
 
 class BasePSMLevScorer():
@@ -24,11 +22,14 @@ class BasePSMLevScorer():
                  bin_prob_thresholds=[],
                  min_intensity=0.02
                 ):
-        
+        ## Bin prob threshold for computimg number of predicted changes
         self.bin_prob_thresholds = bin_prob_thresholds
+        ## Min intensity of peaks in spectra
         self.min_intensity = min_intensity
         
     def _get_p2p_features(self, _change_probs):
+        
+        ## Compute number of predicted changes for each prob threshold
         p2p_features = []
         for thres in self.bin_prob_thresholds:
             n_changes = []
@@ -41,25 +42,26 @@ class BasePSMLevScorer():
     def _get_features(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_change_bin_probs, original_scores=None):
         
         # Assume exp int und exp mzs are preprocessed with ms2_comparison._process_exp_ms2
+        
+        ## Process prosit-predicted spectra
         prosit_mzs, prosit_ints = ms2_comparison._process_theo_ms2(prosit_mzs, prosit_ints, 
                                                                    min_intensity=self.min_intensity)
+        
+        ## Compute similarity and counting features
         with np.errstate(divide='ignore'):  
             features = ms2_comparison.compute_all_features(prosit_mzs, prosit_ints, exp_mzs, exp_ints)
+        
+        ## Append features from bin reclassification model
         features = np.append(self._get_p2p_features(y_change_bin_probs), features, axis=1)  
+        
+        ## Optionally add original scores from denovo sequencing tool as feature
         if original_scores is not None:
             features = np.hstack([features, original_scores.reshape(-1,1)])
-        
-        nans = np.argwhere(np.isnan(features))
-        infs = np.argwhere(np.isinf(features))
-        if nans.shape[0]!=0:
-            print('NANs:', nans)
-            print('Prosit for nans:', prosit_mzs[np.unique(nans[:,0])])
-        if infs.shape[0]!=0:
-            print('INFs:', infs)
-            print('Prosit for infs:', prosit_mzs[np.unique(infs[:,0])])
         return features
     
     def _load_pickle_model(self, pickle_path):
+        
+        ## Load trained model
         with open(pickle_path, 'rb') as file:
             pickle_model = pickle.load(file)
         return pickle_model
@@ -79,6 +81,7 @@ class PSMLevScorerTrainer(BasePSMLevScorer):
                   n_estimators=400, max_depth=10, eta=0.1, 
                   gamma=0, subsample=0.9, colsample_bytree=0.2):
         
+        ## Train xgboost regressor
         from xgboost import XGBRegressor
         model = XGBRegressor(n_estimators=n_estimators,
                              max_depth=max_depth, 
@@ -98,7 +101,7 @@ class PSMLevScorerTrainer(BasePSMLevScorer):
                   n_estimators=180, max_depth=400, min_samples_split=100,
                   min_samples_leaf=80, min_weight_fraction_leaf=0.,
                   max_features=90, n_jobs=-1):
-        
+        ## Train random forest
         from sklearn.ensemble import RandomForestRegressor
         model = RandomForestRegressor(n_estimators=n_estimators, criterion='mse', 
                                       max_depth=max_depth, 
@@ -120,6 +123,7 @@ class PSMLevScorerTrainer(BasePSMLevScorer):
     @staticmethod
     def _get_metrics(model, features, targets):
         
+        ## Get evaluation metrics: r2 and mse
         from sklearn import metrics
         r2 =  model.score( features, targets)
         preds = model.predict(features)
@@ -129,7 +133,7 @@ class PSMLevScorerTrainer(BasePSMLevScorer):
     
     def create_feature_files(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_change_bin_probs, targets,
                             save_as, original_scores=None):
-        
+        ## Store computed features in hdf5 files
         import h5py
         features = self._get_features( exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_change_bin_probs, original_scores)
               
@@ -141,7 +145,7 @@ class PSMLevScorerTrainer(BasePSMLevScorer):
     
     def train(self, features, targets, model_type='xgboost', save_as=None):
         
-        
+        ## Train model
         if model_type=='xgboost':
             print('Training XGBoost')
             model = self._train_xg(features, targets) 
@@ -202,7 +206,8 @@ class PSMLevScorer(BasePSMLevScorer):
         
         print(f'[INFO] Loaded scorer:\n\t{self.scorer}')
     
-    def get_scores(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, y_change_bin_probs, return_features=False, original_scores=None):
+    def get_scores(self, exp_mzs, exp_ints, prosit_ints, prosit_mzs, 
+                   y_change_bin_probs, return_features=False, original_scores=None):
         
         features = self._get_features(exp_mzs, exp_ints, prosit_ints, prosit_mzs, 
                                       y_change_bin_probs, original_scores)
