@@ -1,6 +1,8 @@
 ### PATHS
-binreclass_model_path: 'spectralis_binreclass.pt'
-scorer_path: 'spectralis_score.pkl'
+#binreclass_model_path: 'spectralis_binreclass.pt'
+#scorer_path: 'spectralis_score.pkl'
+binreclass_model_path: '/s/project/denovo-prosit/JohannesHingerl/models/focal_loss_wang_jit_model.pt'
+scorer_path: '/s/project/denovo-prosit/data/PXD010154/RF_models/wang_models/withP2P_logLev_wSimulatedDataset_updatedFeats_wCasanovo_wGA_wSimData/BEST_REL_PERF__rf_model_NTREES86_MINSPLIT4_MINLEAF112_MAXFEAT36_MAXDEPTH175.pkl'
 
 
 ### BIN RECLASSIFICATION

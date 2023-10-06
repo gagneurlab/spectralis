@@ -1,3 +1,4 @@
+### Command line entry point for Spectralis
 import logging
 logging.captureWarnings(True)
 
@@ -20,7 +21,7 @@ from .spectralis_master import Spectralis
 )
 @click.option(
     "--config",
-    default='spectralis_config.yaml',
+    default='../spectralis_config.yaml',
     help="Configuration file containing Spectralis custom options. Default configuration file: https://github.com/gagneurlab/spectralis/blob/main/spectralis_config.yaml.",
     type=click.Path(exists=True, dir_okay=False),
 )
@@ -71,6 +72,8 @@ def main(   mode,
     '''
         
     print('=================== SPECTRALIS ===================\n\n\n')
+    
+    ## Initialize Spectralis object reading config file
     spectralis = Spectralis(config)
     
     if mode=="rescoring":
