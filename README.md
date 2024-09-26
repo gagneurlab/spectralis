@@ -1,6 +1,13 @@
 # Spectralis
 
-Spectralis is new method for de novo peptide sequencing which builds upon a new modeling task, bin reclassification, which assigns ion series to discretized m/z values even in the absence of a peak based on amino acid-gapped convolutional layers. Spectralis allows the rescoring of any peptide-spectrum match (PSM, Spectralis-score), which can be used as a post-processing step of any existing de novo sequencing tool or to combine results from multiple de novo sequencing tools. Furthermore, Spectralis allows the fine-tuning of peptide-spectrum matches in an evolutionary algorithm (Spectralis-EA).
+Spectralis is a new method for de novo peptide sequencing that builds upon a new modeling task, bin reclassification. Bin reclassification assigns ion series to discretized m/z values even in the absence of a peak based on amino acid-gapped convolutional layers. 
+
+Spectralis allows the rescoring of any peptide-spectrum match (PSM, Spectralis-score), which can be used as a post-processing step of any existing de novo sequencing tool or to combine results from multiple de novo sequencing tools. Furthermore, Spectralis allows the fine-tuning of peptide-spectrum matches in an evolutionary algorithm (Spectralis-EA).
+
+For more information see:
+
+- Daniela Klaproth-Andrade, Johannes Hingerl, Yanik Bruns, Nicholas H. Smith, Jakob Träuble, Mathias Wilhelm, Julien Gagneur: "Deep learning-driven fragment ion series classification enables highly precise and sensitive de novo peptide sequencing", bioRxiv 2023.01.05.522752; doi: https://doi.org/10.1101/2023.01.05.522752
+
 
 ## Installation
 
@@ -203,6 +210,7 @@ spectralis.train_scorer_from_csvs(train_paths,          # path containing traini
 If you use Spectralis, please cite the following:
 
 - Klaproth-Andrade, D., Hingerl, J., Bruns, Y. et al. Deep learning-driven fragment ion series classification enables highly precise and sensitive de novo peptide sequencing. Nat Commun 15, 151 (2024). https://doi.org/10.1038/s41467-023-44323-7
+
 
 
 ## References
