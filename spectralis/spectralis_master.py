@@ -291,7 +291,6 @@ class Spectralis():
         exp_mzs = exp_mzs[idx_valid]
         precursor_m = precursor_m[idx_valid]
         original_scores = original_scores[idx_valid] if original_scores is not None else None
-        print('ORIGINAL SCORES', original_scores)
         
         print(f'-- Input shapes\n\tseqs: {alpha_seqs.shape}, charges: {precursor_z.shape}, ints: {exp_ints.shape}, mzs: {exp_mzs.shape}, precursor mzs: {precursor_m.shape}, original_scores: {original_scores.shape if original_scores is not None else "None"}')
         
