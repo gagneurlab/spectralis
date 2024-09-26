@@ -6,8 +6,7 @@ Spectralis allows the rescoring of any peptide-spectrum match (PSM, Spectralis-s
 
 For more information see:
 
-- Daniela Klaproth-Andrade, Johannes Hingerl, Yanik Bruns, Nicholas H. Smith, Jakob Träuble, Mathias Wilhelm, Julien Gagneur: "Deep learning-driven fragment ion series classification enables highly precise and sensitive de novo peptide sequencing", bioRxiv 2023.01.05.522752; doi: https://doi.org/10.1101/2023.01.05.522752
-
+-  Klaproth-Andrade, D., Hingerl, J., Bruns, Y. et al. Deep learning-driven fragment ion series classification enables highly precise and sensitive de novo peptide sequencing. Nat Commun 15, 151 (2024). https://doi.org/10.1038/s41467-023-44323-7
 
 ## Installation
 
