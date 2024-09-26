@@ -19,7 +19,13 @@ def process_input(path, chunk_offset=None, chunk_size=None,
     df = df[df[precursor_z_col]<=6]
     df[peptide_col] = df[peptide_col].apply(lambda x: x if pd.notnull(x) else '')
     df = df[df[peptide_col]!='']
-    df[peptide_col] = df[peptide_col].apply(lambda s: s.replace(" ", "").replace('L', 'I').replace('OxM', 'M[UNIMOD:35]')) 
+    df[peptide_col] = (df[peptide_col].apply(lambda s: 
+                                             s.replace(" ", "").replace('L', 'I')
+                                             .replace('OxM', 'M[UNIMOD:35]')
+                                             .replace('Z', 'M[UNIMOD:35]')
+                                             .replace('C', 'C[UNIMOD:4]')
+                                            ) 
+                      )
 
     print(df.shape)
     
@@ -56,6 +62,13 @@ def process_input(path, chunk_offset=None, chunk_size=None,
         
     padded_mq_seqs = None
     if peptide_mq_col is not None:
+        df[peptide_mq_col] = (df[peptide_mq_col].apply(lambda s: 
+                                             s.replace(" ", "").replace('L', 'I')
+                                             .replace('OxM', 'M[UNIMOD:35]')
+                                             .replace('Z', 'M[UNIMOD:35]')
+                                             .replace('C', 'C[UNIMOD:4]')
+                                            ) 
+                      )
         df["peptide_mq_int"] = df[peptide_mq_col].apply(U.map_peptide_to_numbers)
         padded_mq_seqs = np.array([np.asarray(x) for x in df["peptide_mq_int"]]).flatten()
         padded_mq_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in padded_mq_seqs])

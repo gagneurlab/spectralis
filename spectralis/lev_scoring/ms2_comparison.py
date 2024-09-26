@@ -27,6 +27,29 @@ def _compute_common_peaks(theo_mzs, theo_int, exp_mzs, exp_int, ppm_diff=20):
     #print (np.nonzero(theo_mzs[theo_mzs>0])
     return common_peaks
 
+def compute_all_spectral_angles(all_theo_mzs, all_theo_ints, all_exp_mzs, all_exp_ints):
+    
+    start_common_feats = timer()
+    all_common_peaks = Parallel(n_jobs = -1)(delayed(_compute_common_peaks)(*input) for input in 
+                                                    zip(all_theo_mzs, 
+                                                        all_theo_ints,
+                                                        all_exp_mzs,
+                                                        all_exp_ints))
+    all_common_peaks = np.stack(all_common_peaks)
+    print(f'--- Elapsed time for collecting {len(all_common_peaks)} common peaks: {timedelta(seconds=timer()-start_common_feats)}')
+    
+    ## compute SA
+    start_distance = timer()
+    exp_int=all_common_peaks[:,:,3]
+    theo_int=all_common_peaks[:,:,1]
+    
+    cases = [(0, False),(4, False),(5, False),(0, True),(4, True),(5, True)]
+    cases_output = Parallel(n_jobs = -1)(delayed(sim._get_spectral_angle)(exp_int.copy(), theo_int.copy(), case[0]) for case in cases)
+    res_spectral = np.stack(cases_output).reshape(-1, exp_int.shape[0],order='F')[0:3]
+    print(f'--- Elapsed time for collecting spectral angle: {timedelta(seconds=timer()-start_distance)}')
+    
+    return res_spectral
+
 def compute_all_features(all_theo_mzs, all_theo_ints, all_exp_mzs, all_exp_ints):
     ''' Compute common peaks and get all features
             For this assume, prosit is (N_samples, 174) arrays containing -1 preprocessed with _process_theo_ms2()

@@ -88,7 +88,7 @@ The following setting should be changed only when training a bin reclassificatio
 
 - For running Spectralis-score or Spectralis-EA, a `.csv` or `.mgf` file serves as input. 
 - The input file should contain the experimental spectra, precursor charge and m/z, spectrum identifiers, as well as the initial peptide sequence to score or fine-tune. 
-- An example of an input file can be found in `example.mgf`.
+- An example of an input file can be found in `example_mgf/example.mgf`.
 
 ## Running Spectralis
 
@@ -107,7 +107,7 @@ spectralis --help
 To obtain Spectralis-scores for PSMs in an `.mgf` file, run the following command selecting the rescoring mode (`--mode=rescoring`) :
 
 ```
-spectralis --mode="rescoring" --input_path="example.mgf" --output_path="output_spectralis_rescoring.csv" --config="spectralis_config.yaml"
+spectralis --mode="rescoring" --input_path="example_mgf/example.mgf" --output_path="output_spectralis_rescoring.csv" --config="spectralis_config.yaml"
 ```
 
 The computed scores from the input file (`--input_path="<file_name>.mgf"`) will be stored in the specified output file (`--output_path=""<file_name>.csv"`).
@@ -118,7 +118,7 @@ If a configuration file is not specified, the default file `spectralis_config.ya
 Similarly, to fine-tune initial PSMs with Spectralis-EA from an `.mgf` file, run the following command selecting the fine-tuning mode (`--mode=ea`):
 
 ```
-spectralis --mode="ea" --input_path="example.mgf" --output_path="output_spectralis_ea.csv" --config="spectralis_config.yaml"
+spectralis --mode="ea" --input_path="example_mgf/example.mgf" --output_path="output_spectralis_ea.csv" --config="spectralis_config.yaml"
 ```
 
 The fine-tuned sequences together with Spectralis-scores will be stored in the specified output file (`--output_path=""<file_name>.csv"`).
@@ -129,7 +129,7 @@ The fine-tuned sequences together with Spectralis-scores will be stored in the s
 To get predictions from the bin reclassification mode given an input `.mgf` file, run the following command selecting the bin reclassification mode (`--mode="bin_reclassification"`):
 
 ```
-spectralis --config="spectralis_config.yaml" --mode="bin_reclassification" --input_path="example.mgf" --output_path="output_binreclass.hdf5"
+spectralis --config="spectralis_config.yaml" --mode="bin_reclassification" --input_path="example_mgf/example.mgf" --output_path="output_binreclass.hdf5"
 ```
 
 
@@ -151,7 +151,7 @@ spectralis = Spectralis(config_path="spectralis_config.yaml")
 To obtain Spectralis-scores for PSMs in an `.mgf` file, run the following command:
 
 ```
-spectralis.rescoring_from_mgf(mgf_path="example.mgf", out_path="spectralis_example_out.csv")
+spectralis.rescoring_from_mgf(mgf_path="example_mgf/example.mgf", out_path="spectralis_example_out.csv")
 ```
 
 The function returns a data frame with Spectralis-scores and spectrum identifiers. The scores can be also stored in an output file specified in the `out_path` argument of the function.
@@ -161,7 +161,7 @@ The function returns a data frame with Spectralis-scores and spectrum identifier
 To fine-tune initial PSMs with Spectralis-EA from an `.mgf` file, run the following command:
 
 ```
-spectralis.evo_algorithm_from_mgf(mgf_path="example.mgf", output_path="spectralis-ea_example_out.csv")
+spectralis.evo_algorithm_from_mgf(mgf_path="example_mgf/example.mgf", output_path="spectralis-ea_example_out.csv")
 ```
 
 The function returns a data frame with the Spectralis-scores for initial and fine-tuned sequences for each spectrum identifier.
@@ -171,7 +171,7 @@ The function returns a data frame with the Spectralis-scores for initial and fin
 Similarly, to get predictions from the bin reclassification mode given an input `.mgf` file, run the following command:
 
 ```
-binreclass_out = spectralis.bin_reclassification_from_mgf(mgf_path="example.mgf", out_path="output_binreclass.hdf5")
+binreclass_out = spectralis.bin_reclassification_from_mgf(mgf_path="example_mgf/example.mgf", out_path="output_binreclass.hdf5")
 y_probs, y_mz, b_probs, b_mz, y_changes, y_mz_inputs, b_mz_inputs = binreclass_out
 
 ```
@@ -202,7 +202,7 @@ spectralis.train_scorer_from_csvs(train_paths,          # path containing traini
 
 If you use Spectralis, please cite the following:
 
-- Daniela Klaproth-Andrade, Johannes Hingerl, Nicholas H. Yanik Bruns, Smith, Jakob Träuble, Mathias Wilhelm, Julien Gagneur: "Deep learning-driven fragment ion series classification enables highly precise and sensitive de novo peptide sequencing", bioRxiv 2023.01.05.522752; doi: https://doi.org/10.1101/2023.01.05.522752
+- Klaproth-Andrade, D., Hingerl, J., Bruns, Y. et al. Deep learning-driven fragment ion series classification enables highly precise and sensitive de novo peptide sequencing. Nat Commun 15, 151 (2024). https://doi.org/10.1038/s41467-023-44323-7
 
 
 ## References

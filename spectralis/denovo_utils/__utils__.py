@@ -14,7 +14,7 @@ import time
 
 def get_prosit_output(seqs, charges, prosit_ce, 
                      server_url = 'koina.proteomicsdb.org:443',
-                    model_name = 'Prosit_2019_intensity',
+                    model_name = 'Prosit_2020_intensity_HCD',
                     batch_size = 1000):
     
     is_real = np.isreal(seqs)
