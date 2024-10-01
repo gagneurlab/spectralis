@@ -257,15 +257,22 @@ class Spectralis():
                                 .replace('OxM', "M[UNIMOD:35]")
                                 .replace('M(O)', "M[UNIMOD:35]")
                                 .replace('M(ox)', "M[UNIMOD:35]")
+                                .replace('N[UNIMOD:7]', 'D') ## Replace deamidation
+                                .replace('Q[UNIMOD:7]', 'E') ## Replace deamidation
                                 .replace('Z', "M[UNIMOD:35]") for p in alpha_seqs]
                             )
         if self.config['interpret_c_as_fix']:
             alpha_seqs = np.array([p.replace('C', 'C[UNIMOD:4]') for p in alpha_seqs])
          
         ## peptides padded to SEQ_LEN (Default 30)
-        sequences = [U.map_peptide_to_numbers(p) for p in alpha_seqs]
-        seq_lens = np.array([len(s) for s in sequences])
-        padded_seqs = np.array([np.pad(seq, (0,C.SEQ_LEN-len(seq)), 
+        sequences = []
+        # replace len of invalid seqs with max len so that they are discarded
+        for s in [U.map_peptide_to_numbers(p) for p in alpha_seqs]:
+            s = s if s is not None else np.zeros((C.SEQ_LEN+1,))
+            sequences.append(s)
+        
+        seq_lens = np.array([len(s) for s in sequences]) 
+        padded_seqs = np.array([np.pad(seq[:C.SEQ_LEN], (0, max(C.SEQ_LEN-len(seq), 0)), 
                                        'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
         
         ## experimental spectra padded to max len of spectra
@@ -286,13 +293,14 @@ class Spectralis():
         scans_invalid = scans[idx_invalid] if idx_invalid.shape[0]>0 else np.array([])
         
         alpha_seqs = alpha_seqs[idx_valid]
+        padded_seqs = padded_seqs[idx_valid]
         precursor_z = precursor_z[idx_valid]
         exp_ints = exp_ints[idx_valid]
         exp_mzs = exp_mzs[idx_valid]
         precursor_m = precursor_m[idx_valid]
         original_scores = original_scores[idx_valid] if original_scores is not None else None
         
-        print(f'-- Input shapes\n\tseqs: {alpha_seqs.shape}, charges: {precursor_z.shape}, ints: {exp_ints.shape}, mzs: {exp_mzs.shape}, precursor mzs: {precursor_m.shape}, original_scores: {original_scores.shape if original_scores is not None else "None"}')
+        print(f'-- Input shapes\n\tseqs: {alpha_seqs.shape}, padded_seqs: {padded_seqs.shape}, charges: {precursor_z.shape}, ints: {exp_ints.shape}, mzs: {exp_mzs.shape}, precursor mzs: {precursor_m.shape}, original_scores: {original_scores.shape if original_scores is not None else "None"}')
         
         return padded_seqs, precursor_z, precursor_m, scans_valid, exp_mzs, exp_ints, alpha_seqs, original_scores, scans_invalid
     
@@ -603,11 +611,13 @@ class Spectralis():
                                                             .replace('M(O)', "M[UNIMOD:35]")
                                                             .replace('M(ox)', "M[UNIMOD:35]")
                                                             .replace('Z', "M[UNIMOD:35]")
+                                                            .replace('N[UNIMOD:7]', 'D') ## Replace deamidation
+                                                            .replace('Q[UNIMOD:7]', 'E') ## Replace deamidation
                                                 ) )
         
         
         df["peptide_int"] = df[peptide_col].apply(U.map_peptide_to_numbers)
-        df["seq_len"] = df["peptide_int"].apply(len)
+        df["seq_len"] = df["peptide_int"].apply(lambda x: len(x) if pd.notnull(x) else C.SEQ_LEN+1)
         
         ## Filter invalid spectra: charge>max_charge or peptide length>seq_len (Default 30 and 6)
         df_notHandled = df[~((df.seq_len>1) & (df.seq_len<=C.SEQ_LEN) & (df[precursor_z_col]<=C.MAX_CHARGE))]
@@ -623,7 +633,7 @@ class Spectralis():
 
         ## Pad peptides
         sequences = [np.asarray(x) for x in df["peptide_int"]]
-        padded_seqs = np.array([np.pad(seq, (0,30-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
+        padded_seqs = np.array([np.pad(seq, (0,C.SEQ_LEN-len(seq)), 'constant', constant_values=(0,0)) for seq in sequences]).astype(int)
         
         df[exp_mzs_col] = df[exp_mzs_col].apply(lambda x: x.replace('[', '').replace(']', '').replace(' ', '').split(","))
         df[exp_ints_col] = df[exp_ints_col].apply(lambda x: x.replace('[', '').replace(']', '').replace(' ', '').split(","))
